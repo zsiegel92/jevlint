@@ -1,0 +1,10 @@
+.gitignore
+biome.json
+install.sh
+pnpm-lock.yaml
+pnpm-workspace.yaml
+scripts/**
+src/**
+tsconfig.json
+node_modules/**
+*.vsix

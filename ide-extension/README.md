@@ -1,0 +1,70 @@
+# JevLint for VS Code
+
+This extension runs one `jevlint watch` process for every `.jevlintrc.toml`
+found in a trusted workspace. It converts the versioned JSON Lines stream into
+native VS Code diagnostics.
+
+- Error and warning severities appear in the Problems panel and editor.
+- Line-detected findings underline each complete reported line range.
+- File-wide findings use the first line, which gives VS Code a conventional
+  location for navigation and file-level decoration.
+- Multi-root workspaces and nested project configurations are supported.
+- Complete snapshots replace previous diagnostics, preventing stale findings.
+- Watch processes restart with bounded exponential backoff after unexpected
+  exits.
+
+## Install
+
+Install the `jevlint` CLI first from the repository root:
+
+```sh
+./install-to-path.sh
+```
+
+Then install the extension:
+
+```sh
+cd ide-extension
+./install.sh
+```
+
+The installer uses pnpm's frozen lockfile, runs type checking, Biome, formatting
+checks, and tests, builds a bundled CommonJS extension, creates
+`jevlint-vscode.vsix`, and installs it with the VS Code CLI. Set `CODE_BIN` to
+another compatible command, such as `code-insiders`, when needed.
+
+For development:
+
+```sh
+pnpm install
+pnpm check
+pnpm build
+pnpm watch
+```
+
+## Configuration
+
+The extension searches every workspace folder for `.jevlintrc.toml`. JevLint
+paths remain relative to the folder containing that file, exactly as they are in
+the CLI.
+
+The executable defaults to `jevlint` on the extension host's `PATH`, with an
+automatic fallback to `~/.local/bin/jevlint`. Override it with an absolute path
+for any other installation location:
+
+```json
+{
+  "jevlint.executablePath": "/Users/me/.local/bin/jevlint"
+}
+```
+
+`TYPESAFE_API_KEY` must also be available in the extension host environment.
+For remote SSH, containers, or Codespaces, install and configure the CLI in the
+remote workspace environment because this is a workspace extension.
+
+Use **JevLint: Show Output** for process errors and precondition output, and
+**JevLint: Restart Watchers** after changing external environment variables.
+Set `jevlint.trace.server` to `messages` or `verbose` for protocol debugging.
+
+Workspace Trust is respected: no project command or JevLint process starts in an
+untrusted workspace.

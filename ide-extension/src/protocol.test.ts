@@ -1,0 +1,50 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { parseWatchMessage } from "./protocol.js";
+
+test("parses a warning with a line region", () => {
+	const message = parseWatchMessage(
+		JSON.stringify({
+			schema_version: 1,
+			kind: "snapshot",
+			sequence: 3,
+			root: "/project",
+			line_base: 1,
+			status: "violations",
+			diagnostics: [
+				{
+					path: "src/main.ts",
+					rule_id: "clear-boundaries",
+					severity: "warning",
+					confidence: 0.91,
+					regions: [{ start_line: 4, end_line: 6 }],
+				},
+			],
+			stats: {
+				files_checked: 1,
+				rules: 1,
+				api_requests: 1,
+				cache_hits: 0,
+				violations: 1,
+				errors: 0,
+				warnings: 1,
+			},
+			precondition: null,
+			error: null,
+		}),
+	);
+	assert.equal(message.kind, "snapshot");
+	assert.equal(message.diagnostics[0]?.severity, "warning");
+	assert.deepEqual(message.diagnostics[0]?.regions[0], {
+		startLine: 4,
+		endLine: 6,
+	});
+});
+
+test("rejects an unknown severity", () => {
+	assert.throws(() =>
+		parseWatchMessage(
+			'{"schema_version":1,"kind":"snapshot","sequence":1,"root":"/","line_base":1,"status":"violations","diagnostics":[{"path":"x","rule_id":"r","severity":"info","confidence":1,"regions":[]}],"stats":null,"precondition":null,"error":null}',
+		),
+	);
+});

@@ -43,6 +43,19 @@ errors.
 Ready-to-copy configurations for TypeScript with TSC and Biome, and Python with
 Pyright and Ruff, are available under [`example-configs/`](example-configs/).
 
+## VS Code extension
+
+Install the bundled VS Code extension directly from this repository:
+
+```sh
+./ide-extension/install.sh
+```
+
+It discovers `.jevlintrc.toml` files, runs the watch protocol, and publishes
+native error and warning diagnostics. See
+[`ide-extension/README.md`](ide-extension/README.md) for development commands
+and settings.
+
 ## Watch mode and editor integration
 
 `jevlint watch` performs an initial run, watches the project with native
