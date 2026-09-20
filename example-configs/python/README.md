@@ -5,6 +5,9 @@ virtual environments, caches, build products, migrations, and generated protobuf
 modules. Its semantic rules focus on swallowed exceptions and unchecked dynamic
 data at trust boundaries.
 
+Broad exception swallowing is configured as an error, while unvalidated dynamic
+data is a warning. Change their entries under `[rule_severity]` as needed.
+
 The precondition runs once for the whole project and requires both commands to
 succeed:
 

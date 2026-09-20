@@ -7,6 +7,10 @@ model = "jev-latest"
 concurrency = 5
 request_timeout_seconds = 30
 
+# Rules default to error. Override individual rule IDs when needed.
+# [rule_severity]
+# maintainability-note = "warning"
+
 [line_detection]
 enabled = true
 max_questions_per_request = 200

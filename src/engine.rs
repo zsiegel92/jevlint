@@ -10,7 +10,7 @@ use crate::{
     files, hash,
     jev::{LineAnswer, LineQuestion, LintProvider, RuleAnswer, Verdict},
     precondition::{CommandPrecondition, Precondition, PreconditionFailure},
-    rule::{self, Rule},
+    rule::{self, Rule, Severity},
 };
 
 #[derive(Debug)]
@@ -23,11 +23,27 @@ pub struct RunReport {
     pub precondition_failure: Option<PreconditionFailure>,
 }
 
+impl RunReport {
+    pub fn count(&self, severity: Severity) -> usize {
+        self.violations
+            .iter()
+            .filter(|violation| violation.severity == severity)
+            .count()
+    }
+
+    pub fn has_errors(&self) -> bool {
+        self.violations
+            .iter()
+            .any(|violation| violation.severity == Severity::Error)
+    }
+}
+
 #[derive(Debug)]
 pub struct Violation {
     pub path: PathBuf,
     pub rule_id: String,
     pub confidence: f64,
+    pub severity: Severity,
     pub regions: Vec<LineRegion>,
 }
 
@@ -64,7 +80,13 @@ impl Engine {
 
     pub async fn run(&self) -> anyhow::Result<RunReport> {
         let files = self.selected_files()?;
-        let rules = Arc::new(rule::load(&self.root.join(&self.config.rules_dir)).await?);
+        let rules = Arc::new(
+            rule::load(
+                &self.root.join(&self.config.rules_dir),
+                &self.config.rule_severity,
+            )
+            .await?,
+        );
         if let Some(precondition) = &self.precondition
             && let Some(failure) = precondition.check(&self.root, &files).await?
         {
@@ -254,6 +276,12 @@ async fn lint_file(context: Arc<FileContext>, path: PathBuf) -> anyhow::Result<F
             path: path.clone(),
             rule_id: answer.rule_id.clone(),
             confidence: answer.confidence,
+            severity: context
+                .rules
+                .iter()
+                .find(|rule| rule.id == answer.rule_id)
+                .expect("answer rule was requested")
+                .severity,
             regions: regions(
                 locations
                     .get(&answer.rule_id)
@@ -392,6 +420,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use crate::rule::Severity;
     use async_trait::async_trait;
 
     struct FakeProvider {
@@ -463,17 +492,25 @@ mod tests {
             include: vec!["*.rs".into()],
             ..Config::default()
         };
+        let mut config = config;
+        config
+            .rule_severity
+            .insert("safe".into(), Severity::Warning);
         let engine = Engine::new(project.path().into(), config.clone(), provider.clone());
         let first = engine.run().await.unwrap();
         assert_eq!(first.api_requests, 2);
+        assert_eq!(first.violations[0].severity, Severity::Warning);
+        assert!(!first.has_errors());
         assert_eq!(first.violations[0].regions[0].start, 1);
 
+        config.rule_severity.insert("safe".into(), Severity::Error);
         let second = Engine::new(project.path().into(), config, provider.clone())
             .run()
             .await
             .unwrap();
         assert_eq!(second.api_requests, 0);
         assert_eq!(second.cache_hits, 2);
+        assert!(second.has_errors());
         assert_eq!(provider.calls.load(Ordering::Relaxed), 2);
     }
 }

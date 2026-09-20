@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     num::NonZeroUsize,
     path::{Path, PathBuf},
     time::Duration,
@@ -7,12 +8,15 @@ use std::{
 use anyhow::{Context, ensure};
 use serde::Deserialize;
 
+use crate::rule::Severity;
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub rules_dir: PathBuf,
+    pub rule_severity: BTreeMap<String, Severity>,
     pub system_prompt: PathBuf,
     pub cache_dir: PathBuf,
     pub model: String,
@@ -48,6 +52,7 @@ impl Default for Config {
             include: vec!["**/*.rs".into()],
             exclude: vec!["target/**".into(), ".jevlint/**".into()],
             rules_dir: ".jevlint-rules".into(),
+            rule_severity: BTreeMap::new(),
             system_prompt: ".jevlint-system.md".into(),
             cache_dir: ".jevlint".into(),
             model: "jev-latest".into(),

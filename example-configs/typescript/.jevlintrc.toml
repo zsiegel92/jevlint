@@ -16,6 +16,10 @@ model = "jev-latest"
 concurrency = 5
 request_timeout_seconds = 30
 
+[rule_severity]
+no-floating-promises = "error"
+no-unvalidated-boundary-cast = "warning"
+
 [line_detection]
 enabled = true
 max_questions_per_request = 200

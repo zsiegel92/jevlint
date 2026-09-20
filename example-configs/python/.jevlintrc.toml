@@ -20,6 +20,10 @@ model = "jev-latest"
 concurrency = 5
 request_timeout_seconds = 30
 
+[rule_severity]
+no-broad-exception-swallowing = "error"
+no-unvalidated-dynamic-data = "warning"
+
 [line_detection]
 enabled = true
 max_questions_per_request = 200

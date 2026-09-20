@@ -16,6 +16,7 @@ use crate::{
     files::FileMatcher,
     jev::JevClient,
     precondition::PreconditionFailure,
+    rule::Severity,
 };
 
 const PROTOCOL_VERSION: u8 = 1;
@@ -236,7 +237,7 @@ enum Status {
 struct Diagnostic {
     path: PathBuf,
     rule_id: String,
-    severity: &'static str,
+    severity: Severity,
     confidence: f64,
     regions: Vec<Region>,
 }
@@ -254,6 +255,8 @@ struct Stats {
     api_requests: usize,
     cache_hits: usize,
     violations: usize,
+    errors: usize,
+    warnings: usize,
 }
 
 #[derive(Serialize)]
@@ -279,6 +282,8 @@ impl Snapshot {
             api_requests: report.api_requests,
             cache_hits: report.cache_hits,
             violations: report.violations.len(),
+            errors: report.count(Severity::Error),
+            warnings: report.count(Severity::Warning),
         };
         Self {
             schema_version: PROTOCOL_VERSION,
@@ -319,7 +324,7 @@ impl From<Violation> for Diagnostic {
         Self {
             path: value.path,
             rule_id: value.rule_id,
-            severity: "error",
+            severity: value.severity,
             confidence: value.confidence,
             regions: value
                 .regions

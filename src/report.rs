@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use crate::engine::{LineRegion, RunReport};
+use crate::rule::Severity;
 
 pub fn print(report: &RunReport, mut output: impl Write, mut errors: impl Write) -> io::Result<()> {
     if let Some(failure) = &report.precondition_failure {
@@ -24,8 +25,9 @@ pub fn print(report: &RunReport, mut output: impl Write, mut errors: impl Write)
         if violation.regions.is_empty() {
             writeln!(
                 output,
-                "{}: error [{}] ({:.2})",
+                "{}: {} [{}] ({:.2})",
                 violation.path.display(),
+                violation.severity,
                 violation.rule_id,
                 violation.confidence
             )?;
@@ -33,9 +35,10 @@ pub fn print(report: &RunReport, mut output: impl Write, mut errors: impl Write)
             for region in &violation.regions {
                 writeln!(
                     output,
-                    "{}:{}: error [{}] ({:.2})",
+                    "{}:{}: {} [{}] ({:.2})",
                     violation.path.display(),
                     display_region(region),
+                    violation.severity,
                     violation.rule_id,
                     violation.confidence
                 )?;
@@ -44,12 +47,13 @@ pub fn print(report: &RunReport, mut output: impl Write, mut errors: impl Write)
     }
     writeln!(
         output,
-        "jevlint: {} files, {} rules, {} API requests, {} cached, {} violations",
+        "jevlint: {} files, {} rules, {} API requests, {} cached, {} errors, {} warnings",
         report.files_checked,
         report.rules,
         report.api_requests,
         report.cache_hits,
-        report.violations.len()
+        report.count(Severity::Error),
+        report.count(Severity::Warning)
     )
 }
 

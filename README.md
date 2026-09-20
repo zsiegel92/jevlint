@@ -23,7 +23,22 @@ cargo run --release
 
 The optional project precondition runs once before any Jev requests. A nonzero exit marks every selected file as skipped and exits with status 1. This conservative batch behavior works with commands such as `cargo check`, `tsc --noEmit`, Biome, or ESLint without repeatedly invoking them per file.
 
-Exit status is 0 when every rule passes, 1 for lint violations or a failed precondition, and 2 for configuration, I/O, cache, or API errors.
+Rules are errors by default. Configure warning-only rules by their Markdown
+filename without the `.md` extension:
+
+```toml
+[rule_severity]
+security-boundary = "error"
+maintainability-note = "warning"
+```
+
+Unknown rule IDs and values other than `error` or `warning` are rejected.
+Warnings appear in human and machine output but do not make a check exit with
+status 1.
+
+Exit status is 0 when there are no error-severity violations, 1 for one or more
+errors or a failed precondition, and 2 for configuration, I/O, cache, or API
+errors.
 
 Ready-to-copy configurations for TypeScript with TSC and Biome, and Python with
 Pyright and Ruff, are available under [`example-configs/`](example-configs/).

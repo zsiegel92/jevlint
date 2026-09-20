@@ -88,7 +88,7 @@ async fn check(config_path: PathBuf, dry_run: bool) -> anyhow::Result<()> {
     let engine = Engine::new(root, config, provider);
     let result = engine.run().await?;
     report::print(&result, std::io::stdout(), std::io::stderr())?;
-    if result.precondition_failure.is_some() || !result.violations.is_empty() {
+    if result.precondition_failure.is_some() || result.has_errors() {
         std::process::exit(1);
     }
     Ok(())

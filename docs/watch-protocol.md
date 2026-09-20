@@ -42,9 +42,11 @@ files because rules, shared prompts, and preconditions have project-wide effects
   "stats": {
     "files_checked": 18,
     "rules": 2,
-    "api_requests": 1,
-    "cache_hits": 35,
-    "violations": 1
+      "api_requests": 1,
+      "cache_hits": 35,
+      "violations": 1,
+      "errors": 1,
+      "warnings": 0
   },
   "precondition": null,
   "error": null
@@ -54,6 +56,8 @@ files because rules, shared prompts, and preconditions have project-wide effects
 A snapshot is authoritative and replaces all diagnostics from older sequences.
 Paths are relative to `root`. Lines are inclusive and use `line_base`; a
 diagnostic with no regions applies to the whole file.
+`severity` is either `error` or `warning` and should be mapped to the editor's
+corresponding diagnostic severity.
 
 `status` is one of:
 
