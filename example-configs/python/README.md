@@ -25,3 +25,6 @@ command = ["sh", "-c", "uv run pyright && uv run ruff check ."]
 Copy `.jevlintrc.toml`, `.jevlint-system.md`, and `.jevlint-rules/` to the root
 of the target project. Relative paths and the precondition working directory are
 based on the folder containing the configuration file.
+
+For editor integration, `jevlint watch` emits versioned JSON Lines on stdout.
+The 300 ms debounce in this example coalesces typical save bursts.

@@ -3,17 +3,37 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::Context;
-use clap::Parser;
-use jevlint::{Config, Engine, files, jev::JevClient, report};
+use anyhow::{Context, ensure};
+use clap::{Parser, Subcommand};
+use jevlint::{
+    Config, Engine, files,
+    jev::JevClient,
+    report,
+    watch::{self, WatchOptions},
+};
 
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
-    #[arg(long, default_value = ".jevlintrc.toml")]
+    #[arg(long, global = true, default_value = ".jevlintrc.toml")]
     config: PathBuf,
     #[arg(long)]
     dry_run: bool,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Watch the project and emit complete diagnostic snapshots as JSON Lines.
+    Watch {
+        /// Atomically replace this file with the latest JSON snapshot.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Write snapshots only to --output, not standard output.
+        #[arg(long)]
+        no_stdout: bool,
+    },
 }
 
 #[tokio::main]
@@ -27,12 +47,33 @@ async fn main() {
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let config_path = absolute(&cli.config)?;
+    match cli.command {
+        Some(Command::Watch { output, no_stdout }) => {
+            ensure!(!cli.dry_run, "--dry-run cannot be used with watch");
+            ensure!(
+                output.is_some() || !no_stdout,
+                "watch needs stdout or --output"
+            );
+            watch::run(
+                config_path,
+                WatchOptions {
+                    snapshot_file: output.map(|path| absolute(&path)).transpose()?,
+                    stdout: !no_stdout,
+                },
+            )
+            .await
+        }
+        None => check(config_path, cli.dry_run).await,
+    }
+}
+
+async fn check(config_path: PathBuf, dry_run: bool) -> anyhow::Result<()> {
     let root = config_path
         .parent()
         .context("config path has no parent")?
         .to_owned();
     let config = Config::load(&config_path).await?;
-    if cli.dry_run {
+    if dry_run {
         let selected = files::discover(&root, &config)?;
         println!("jevlint: would lint {} files", selected.len());
         for path in selected {

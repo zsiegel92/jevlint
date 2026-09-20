@@ -11,6 +11,9 @@ request_timeout_seconds = 30
 enabled = true
 max_questions_per_request = 200
 
+[watch]
+debounce_milliseconds = 300
+
 # A nonzero result safely skips every selected file. The command runs once per pass.
 # [precondition]
 # command = ["cargo", "check", "--quiet"]

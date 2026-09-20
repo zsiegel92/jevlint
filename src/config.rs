@@ -19,6 +19,7 @@ pub struct Config {
     pub concurrency: NonZeroUsize,
     pub request_timeout_seconds: u64,
     pub line_detection: LineDetectionConfig,
+    pub watch: WatchConfig,
     pub precondition: Option<PreconditionConfig>,
 }
 
@@ -35,6 +36,12 @@ pub struct PreconditionConfig {
     pub command: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WatchConfig {
+    pub debounce_milliseconds: u64,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -47,6 +54,7 @@ impl Default for Config {
             concurrency: NonZeroUsize::new(5).unwrap(),
             request_timeout_seconds: 30,
             line_detection: LineDetectionConfig::default(),
+            watch: WatchConfig::default(),
             precondition: None,
         }
     }
@@ -57,6 +65,14 @@ impl Default for LineDetectionConfig {
         Self {
             enabled: true,
             max_questions_per_request: NonZeroUsize::new(200).unwrap(),
+        }
+    }
+}
+
+impl Default for WatchConfig {
+    fn default() -> Self {
+        Self {
+            debounce_milliseconds: 300,
         }
     }
 }
@@ -88,5 +104,9 @@ impl Config {
 
     pub fn request_timeout(&self) -> Duration {
         Duration::from_secs(self.request_timeout_seconds)
+    }
+
+    pub fn watch_debounce(&self) -> Duration {
+        Duration::from_millis(self.watch.debounce_milliseconds)
     }
 }

@@ -24,5 +24,8 @@ request_timeout_seconds = 30
 enabled = true
 max_questions_per_request = 200
 
+[watch]
+debounce_milliseconds = 300
+
 [precondition]
 command = ["sh", "-c", "pyright && ruff check ."]

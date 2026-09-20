@@ -6,9 +6,26 @@ use ignore::WalkBuilder;
 
 use crate::config::Config;
 
+pub struct FileMatcher {
+    include: GlobSet,
+    exclude: GlobSet,
+}
+
+impl FileMatcher {
+    pub fn new(config: &Config) -> anyhow::Result<Self> {
+        Ok(Self {
+            include: build_globs(&config.include)?,
+            exclude: build_globs(&config.exclude)?,
+        })
+    }
+
+    pub fn matches(&self, relative_path: &Path) -> bool {
+        self.include.is_match(relative_path) && !self.exclude.is_match(relative_path)
+    }
+}
+
 pub fn discover(root: &Path, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
-    let include = build_globs(&config.include)?;
-    let exclude = build_globs(&config.exclude)?;
+    let matcher = FileMatcher::new(config)?;
     let mut files = Vec::new();
     for entry in WalkBuilder::new(root)
         .hidden(false)
@@ -20,7 +37,7 @@ pub fn discover(root: &Path, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
             continue;
         }
         let relative = entry.path().strip_prefix(root).unwrap_or(entry.path());
-        if include.is_match(relative) && !exclude.is_match(relative) {
+        if matcher.matches(relative) {
             files.push(relative.to_path_buf());
         }
     }
