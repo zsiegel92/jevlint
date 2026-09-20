@@ -16,10 +16,13 @@ The optional project precondition runs once before any Jev requests. A nonzero e
 
 Exit status is 0 when every rule passes, 1 for lint violations or a failed precondition, and 2 for configuration, I/O, cache, or API errors.
 
+Ready-to-copy configurations for TypeScript with TSC and Biome, and Python with
+Pyright and Ruff, are available under [`example-configs/`](example-configs/).
+
 ## Cache and execution model
 
 The cache is a transactional redb database under `.jevlint/cache.redb`. Verdict keys include the normalized relative path, file content, individual rule content, system prompt, requested model, response schema, and tool namespace. Line-location entries add the line number and use a separate schema namespace. Writes are atomic; reads and writes are batched per file.
 
-Files are scheduled with bounded Tokio concurrency. One verdict request contains every uncached rule for a file. Only failed rules enter localization, where every `(rule, line)` question is independently cached and requests are bounded by `questions_per_request`. Adjacent positive lines are printed as one region.
+Files are scheduled with bounded Tokio concurrency. One verdict request contains every uncached rule for a file. Only failed rules enter line detection, where every `(rule, line)` question is independently cached and requests are bounded by `max_questions_per_request`. Adjacent positive lines are printed as one region.
 
 File discovery honors Git ignore files. Watching, debouncing, LSP diagnostics, and tool-specific precondition adapters are deliberately outside this first CLI pass; the reusable engine and provider/precondition traits are the integration boundaries for them.

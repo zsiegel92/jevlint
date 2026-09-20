@@ -18,15 +18,15 @@ pub struct Config {
     pub model: String,
     pub concurrency: NonZeroUsize,
     pub request_timeout_seconds: u64,
-    pub localization: LocalizationConfig,
+    pub line_detection: LineDetectionConfig,
     pub precondition: Option<PreconditionConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct LocalizationConfig {
+pub struct LineDetectionConfig {
     pub enabled: bool,
-    pub questions_per_request: NonZeroUsize,
+    pub max_questions_per_request: NonZeroUsize,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -46,17 +46,17 @@ impl Default for Config {
             model: "jev-latest".into(),
             concurrency: NonZeroUsize::new(5).unwrap(),
             request_timeout_seconds: 30,
-            localization: LocalizationConfig::default(),
+            line_detection: LineDetectionConfig::default(),
             precondition: None,
         }
     }
 }
 
-impl Default for LocalizationConfig {
+impl Default for LineDetectionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            questions_per_request: NonZeroUsize::new(200).unwrap(),
+            max_questions_per_request: NonZeroUsize::new(200).unwrap(),
         }
     }
 }

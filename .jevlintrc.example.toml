@@ -7,11 +7,10 @@ model = "jev-latest"
 concurrency = 5
 request_timeout_seconds = 30
 
-[localization]
+[line_detection]
 enabled = true
-questions_per_request = 200
+max_questions_per_request = 200
 
 # A nonzero result safely skips every selected file. The command runs once per pass.
 # [precondition]
 # command = ["cargo", "check", "--quiet"]
-

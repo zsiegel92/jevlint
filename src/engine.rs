@@ -86,7 +86,7 @@ impl Engine {
             model: self.config.model.clone(),
             prompt,
             prompt_hash,
-            localization: self.config.localization.clone(),
+            line_detection: self.config.line_detection.clone(),
             rules,
             cache,
             provider: Arc::clone(&self.provider),
@@ -132,7 +132,7 @@ struct FileContext {
     model: String,
     prompt: String,
     prompt_hash: String,
-    localization: crate::config::LocalizationConfig,
+    line_detection: crate::config::LineDetectionConfig,
     rules: Arc<Vec<Rule>>,
     cache: Cache,
     provider: Arc<dyn LintProvider>,
@@ -234,7 +234,7 @@ async fn lint_file(context: Arc<FileContext>, path: PathBuf) -> anyhow::Result<F
         .into_iter()
         .filter(|x| x.verdict == Verdict::Fail)
         .collect::<Vec<_>>();
-    let locations = if context.localization.enabled && !failed.is_empty() {
+    let locations = if context.line_detection.enabled && !failed.is_empty() {
         locate(
             &context,
             &display_path,
@@ -332,7 +332,7 @@ async fn locate(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    for chunk in missing.chunks(context.localization.questions_per_request.get()) {
+    for chunk in missing.chunks(context.line_detection.max_questions_per_request.get()) {
         *api_requests += 1;
         let questions = chunk
             .iter()

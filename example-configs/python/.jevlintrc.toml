@@ -1,0 +1,28 @@
+include = ["*.py", "*.pyi", "**/*.py", "**/*.pyi"]
+exclude = [
+  ".venv/**",
+  "venv/**",
+  ".tox/**",
+  ".nox/**",
+  ".mypy_cache/**",
+  ".pyright/**",
+  ".ruff_cache/**",
+  "build/**",
+  "dist/**",
+  ".jevlint/**",
+  "**/migrations/**",
+  "**/*_pb2.py",
+]
+rules_dir = ".jevlint-rules"
+system_prompt = ".jevlint-system.md"
+cache_dir = ".jevlint"
+model = "jev-latest"
+concurrency = 5
+request_timeout_seconds = 30
+
+[line_detection]
+enabled = true
+max_questions_per_request = 200
+
+[precondition]
+command = ["sh", "-c", "pyright && ruff check ."]

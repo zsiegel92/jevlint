@@ -1,0 +1,28 @@
+include = ["*.ts", "*.tsx", "**/*.ts", "**/*.tsx"]
+exclude = [
+  "node_modules/**",
+  "dist/**",
+  "build/**",
+  "coverage/**",
+  ".next/**",
+  ".jevlint/**",
+  "**/*.d.ts",
+  "**/*.generated.ts",
+]
+rules_dir = ".jevlint-rules"
+system_prompt = ".jevlint-system.md"
+cache_dir = ".jevlint"
+model = "jev-latest"
+concurrency = 5
+request_timeout_seconds = 30
+
+[line_detection]
+enabled = true
+max_questions_per_request = 200
+
+[precondition]
+command = [
+  "sh",
+  "-c",
+  "pnpm exec tsc --noEmit --pretty false && pnpm exec biome check .",
+]
