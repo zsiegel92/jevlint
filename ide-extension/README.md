@@ -9,7 +9,12 @@ native VS Code diagnostics.
 - File-wide findings use the first line, which gives VS Code a conventional
   location for navigation and file-level decoration.
 - Multi-root workspaces and nested project configurations are supported.
-- Complete snapshots replace previous diagnostics, preventing stale findings.
+- Versioned snapshots prevent stale findings and preserve diagnostics that were
+  unaffected by the current pass.
+- Single-file passes replace only that file's diagnostics, so unrelated Problems
+  entries do not flash during edits.
+- Diagnostic messages come from the rule's Markdown message section, and the
+  diagnostic code links to the originating `.md` rule file.
 - Watch processes restart with bounded exponential backoff after unexpected
   exits.
 

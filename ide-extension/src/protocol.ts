@@ -16,6 +16,8 @@ export type Region = {
 export type LintDiagnostic = {
 	path: string;
 	ruleId: string;
+	rulePath: string;
+	message: string;
 	severity: Severity;
 	confidence: number;
 	regions: readonly Region[];
@@ -51,6 +53,8 @@ export type Snapshot = {
 	root: string;
 	lineBase: 1;
 	status: SnapshotStatus;
+	fullUpdate: boolean;
+	updatedPaths: readonly string[];
 	diagnostics: readonly LintDiagnostic[];
 	stats: SnapshotStats | null;
 	precondition: PreconditionStatus | null;
@@ -102,6 +106,10 @@ function parseSnapshot(record: Record<string, unknown>): Snapshot {
 		root: text(record.root, "root"),
 		lineBase: 1,
 		status,
+		fullUpdate: boolean(record.full_update, "full_update"),
+		updatedPaths: array(record.updated_paths, "updated_paths").map((value) =>
+			text(value, "updated_paths[]"),
+		),
 		diagnostics: array(record.diagnostics, "diagnostics").map(parseDiagnostic),
 		stats: nullable(record.stats, parseStats),
 		precondition: nullable(record.precondition, parsePrecondition),
@@ -118,6 +126,8 @@ function parseDiagnostic(value: unknown): LintDiagnostic {
 	return {
 		path: text(record.path, "diagnostic.path"),
 		ruleId: text(record.rule_id, "diagnostic.rule_id"),
+		rulePath: text(record.rule_path, "diagnostic.rule_path"),
+		message: text(record.message, "diagnostic.message"),
 		severity,
 		confidence: probability(record.confidence, "diagnostic.confidence"),
 		regions: array(record.regions, "diagnostic.regions").map(parseRegion),
@@ -178,6 +188,11 @@ function array(value: unknown, name: string): readonly unknown[] {
 
 function text(value: unknown, name: string): string {
 	if (typeof value !== "string") throw new Error(`${name} must be a string`);
+	return value;
+}
+
+function boolean(value: unknown, name: string): boolean {
+	if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
 	return value;
 }
 

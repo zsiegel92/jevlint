@@ -46,6 +46,8 @@ impl RunReport {
 pub struct Violation {
     pub path: PathBuf,
     pub rule_id: String,
+    pub rule_path: PathBuf,
+    pub message: String,
     pub confidence: f64,
     pub severity: Severity,
     pub regions: Vec<LineRegion>,
@@ -84,6 +86,10 @@ impl Engine {
 
     pub async fn run(&self) -> anyhow::Result<RunReport> {
         let files = self.selected_files()?;
+        self.run_files(files).await
+    }
+
+    pub async fn run_files(&self, files: Vec<PathBuf>) -> anyhow::Result<RunReport> {
         let rules = Arc::new(
             rule::load(
                 &self.root.join(&self.config.rules_dir),
@@ -322,22 +328,30 @@ async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<Fi
     };
     let violations = failed
         .into_iter()
-        .map(|answer| Violation {
-            path: path.clone(),
-            rule_id: answer.rule_id.clone(),
-            confidence: answer.confidence,
-            severity: context
+        .map(|answer| {
+            let rule = context
                 .rules
                 .iter()
                 .find(|rule| rule.id == answer.rule_id)
-                .expect("answer rule was requested")
-                .severity,
-            regions: regions(
-                locations
-                    .get(&answer.rule_id)
-                    .map(Vec::as_slice)
-                    .unwrap_or_default(),
-            ),
+                .expect("answer rule was requested");
+            Violation {
+                path: path.clone(),
+                rule_id: answer.rule_id.clone(),
+                rule_path: rule
+                    .source_path
+                    .strip_prefix(&context.root)
+                    .unwrap_or(&rule.source_path)
+                    .to_owned(),
+                message: rule.message.clone(),
+                confidence: answer.confidence,
+                severity: rule.severity,
+                regions: regions(
+                    locations
+                        .get(&answer.rule_id)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default(),
+                ),
+            }
         })
         .collect();
     Ok(FileReport {
@@ -560,6 +574,7 @@ mod tests {
             .unwrap();
         assert_eq!(second.api_requests, 0);
         assert_eq!(second.cache_hits, 2);
+        assert_eq!(second.violations[0].regions[0].start, 1);
         assert!(second.has_errors());
         assert_eq!(provider.calls.load(Ordering::Relaxed), 2);
     }

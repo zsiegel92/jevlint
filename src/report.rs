@@ -25,21 +25,25 @@ pub fn print(report: &RunReport, mut output: impl Write, mut errors: impl Write)
         if violation.regions.is_empty() {
             writeln!(
                 output,
-                "{}: {} [{}] ({:.2})",
+                "{}: {} [{}] {} (rule: {}, confidence: {:.2})",
                 violation.path.display(),
                 violation.severity,
                 violation.rule_id,
+                compact_message(&violation.message),
+                violation.rule_path.display(),
                 violation.confidence
             )?;
         } else {
             for region in &violation.regions {
                 writeln!(
                     output,
-                    "{}:{}: {} [{}] ({:.2})",
+                    "{}:{}: {} [{}] {} (rule: {}, confidence: {:.2})",
                     violation.path.display(),
                     display_region(region),
                     violation.severity,
                     violation.rule_id,
+                    compact_message(&violation.message),
+                    violation.rule_path.display(),
                     violation.confidence
                 )?;
             }
@@ -55,6 +59,16 @@ pub fn print(report: &RunReport, mut output: impl Write, mut errors: impl Write)
         report.count(Severity::Error),
         report.count(Severity::Warning)
     )
+}
+
+fn compact_message(message: &str) -> String {
+    message
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| line.trim_start_matches('#').trim_start())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn display_region(region: &LineRegion) -> String {

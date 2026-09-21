@@ -65,6 +65,12 @@ Unknown rule IDs and values other than `error` or `warning` are rejected.
 Warnings appear in human and machine output but do not make a check exit with
 status 1.
 
+The rule's editor/CLI message is the Markdown before its first horizontal rule
+(`---` or longer). Everything after that separator remains part of the full
+instruction sent to Jev. With no separator, the whole rule is the message. Watch
+diagnostics also carry the project-relative rule file path, which VS Code exposes
+as a clickable diagnostic code.
+
 Exit status is 0 when there are no error-severity violations, 1 for one or more
 errors or a failed precondition, and 2 for configuration, I/O, cache, or API
 errors.
@@ -102,9 +108,11 @@ an editor extension:
 jevlint watch
 ```
 
-Each run emits `run_started`, followed by one complete `snapshot`. A consumer
-should replace all previous diagnostics when a snapshot arrives. Sequence
-numbers associate the two messages and allow consumers to discard stale data.
+Each run emits `run_started`, followed by one complete `snapshot`. The snapshot's
+`updated_paths` identifies exactly which files a streaming consumer should
+replace, while its `diagnostics` still contains the complete current set for
+file-based consumers. Sequence numbers associate the two messages and allow
+consumers to discard stale data.
 Operational failures are snapshots with `"status":"error"`, so a malformed
 rule or temporary API failure clears stale diagnostics without terminating the
 watcher.
@@ -126,6 +134,12 @@ the file option is useful for simpler integrations and debugging. See
 The cache is a transactional redb database under `.jevlint/cache.redb`. Verdict keys include the normalized relative path, file content, individual rule content, system prompt, requested model, response schema, and tool namespace. Line-location entries add the line number and use a separate schema namespace. Writes are atomic; reads and writes are batched per file.
 
 Files are scheduled with bounded Tokio concurrency. One verdict request contains every uncached rule for a file. Only failed rules enter line detection, where every `(rule, line)` question is independently cached and requests are bounded by `max_questions_per_request`. Adjacent positive lines are printed as one region.
+
+Ordinary watch events analyze only the affected files and preserve all other
+diagnostics. Changes to the config, system prompt, or a rule can affect the
+whole project and therefore trigger a full cached pass. Watch mode uses native
+filesystem events; `watch.debounce_milliseconds` controls how long it waits for
+a quiet period while coalescing save bursts.
 
 File discovery and watching honor the configured matchers and Git ignore files.
 Rule-file edits are watched too; changing a rule invalidates only that rule's

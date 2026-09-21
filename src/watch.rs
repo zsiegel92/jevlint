@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::{self, Write},
     path::{Path, PathBuf},
     sync::Arc,
@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use crate::{
     Config, Engine,
     engine::{RunReport, Violation},
-    files::FileMatcher,
+    files::{self, FileMatcher},
     jev::JevClient,
     precondition::PreconditionFailure,
     rule::Severity,
@@ -41,9 +41,15 @@ pub async fn run(config_path: PathBuf, options: WatchOptions) -> anyhow::Result<
     )?;
     watcher.watch(&root, RecursiveMode::Recursive)?;
 
+    let mut state = WatchState::default();
     let mut sequence = 1;
     emit_started(sequence, "initial", &[], &options)?;
-    emit_snapshot(run_once(&root, &config, sequence).await, &options).await?;
+    let initial = RunSelection::full(&root, &config, &state)?;
+    emit_snapshot(
+        run_once(&root, &config, sequence, initial, &mut state).await,
+        &options,
+    )
+    .await?;
 
     loop {
         let first = tokio::select! {
@@ -70,24 +76,73 @@ pub async fn run(config_path: PathBuf, options: WatchOptions) -> anyhow::Result<
         sequence += 1;
         let changed_paths = relative_paths(&root, &paths);
         emit_started(sequence, "filesystem", &changed_paths, &options)?;
+        let full_run = requires_full_run(&root, &config_path, &config, &paths);
         match Config::load(&config_path).await {
             Ok(updated) => config = updated,
             Err(error) => {
                 emit_snapshot(
-                    Snapshot::error(&root, sequence, format!("{error:#}")),
+                    Snapshot::error(&root, sequence, format!("{error:#}"), &state),
                     &options,
                 )
                 .await?;
                 continue;
             }
         }
-        emit_snapshot(run_once(&root, &config, sequence).await, &options).await?;
+        let selection = if full_run {
+            RunSelection::full(&root, &config, &state)
+        } else {
+            RunSelection::changed(&root, &config, &paths, &state)
+        };
+        let selection = match selection {
+            Ok(selection) => selection,
+            Err(error) => {
+                emit_snapshot(
+                    Snapshot::error(&root, sequence, format!("{error:#}"), &state),
+                    &options,
+                )
+                .await?;
+                continue;
+            }
+        };
+        emit_snapshot(
+            run_once(&root, &config, sequence, selection, &mut state).await,
+            &options,
+        )
+        .await?;
     }
     drop(watcher);
     Ok(())
 }
 
-async fn run_once(root: &Path, config: &Config, sequence: u64) -> Snapshot {
+async fn run_once(
+    root: &Path,
+    config: &Config,
+    sequence: u64,
+    selection: RunSelection,
+    state: &mut WatchState,
+) -> Snapshot {
+    let RunSelection {
+        lint_paths,
+        updated_paths,
+        full_update,
+    } = selection;
+    if lint_paths.is_empty() {
+        return Snapshot::from_report(
+            root,
+            sequence,
+            RunReport {
+                files_checked: 0,
+                rules: 0,
+                api_requests: 0,
+                cache_hits: 0,
+                violations: Vec::new(),
+                precondition_failure: None,
+            },
+            updated_paths,
+            full_update,
+            state,
+        );
+    }
     let result = async {
         let api_key = config.typesafe_api_key(root).await?;
         let provider = Arc::new(JevClient::new(
@@ -96,14 +151,96 @@ async fn run_once(root: &Path, config: &Config, sequence: u64) -> Snapshot {
             api_key,
         )?);
         Engine::new(root.to_owned(), config.clone(), provider)
-            .run()
+            .run_files(lint_paths)
             .await
     }
     .await;
     match result {
-        Ok(report) => Snapshot::from_report(root, sequence, report),
-        Err(error) => Snapshot::error(root, sequence, format!("{error:#}")),
+        Ok(report) => {
+            Snapshot::from_report(root, sequence, report, updated_paths, full_update, state)
+        }
+        Err(error) => Snapshot::error(root, sequence, format!("{error:#}"), state),
     }
+}
+
+#[derive(Default)]
+struct WatchState {
+    diagnostics: BTreeMap<PathBuf, Vec<Diagnostic>>,
+}
+
+impl WatchState {
+    fn paths(&self) -> impl Iterator<Item = &PathBuf> {
+        self.diagnostics.keys()
+    }
+
+    fn contains(&self, path: &Path) -> bool {
+        self.diagnostics.contains_key(path)
+    }
+
+    fn all_diagnostics(&self) -> Vec<Diagnostic> {
+        self.diagnostics.values().flatten().cloned().collect()
+    }
+}
+
+struct RunSelection {
+    lint_paths: Vec<PathBuf>,
+    updated_paths: Vec<PathBuf>,
+    full_update: bool,
+}
+
+impl RunSelection {
+    fn full(root: &Path, config: &Config, state: &WatchState) -> anyhow::Result<Self> {
+        let lint_paths = files::discover(root, config)?;
+        let updated_paths = lint_paths
+            .iter()
+            .chain(state.paths())
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        Ok(Self {
+            lint_paths,
+            updated_paths,
+            full_update: true,
+        })
+    }
+
+    fn changed(
+        root: &Path,
+        config: &Config,
+        paths: &[PathBuf],
+        state: &WatchState,
+    ) -> anyhow::Result<Self> {
+        let matcher = FileMatcher::new(config)?;
+        let updated_paths = paths
+            .iter()
+            .filter_map(|path| path.strip_prefix(root).ok())
+            .filter(|relative| matcher.is_lintable(relative) || state.contains(relative))
+            .map(Path::to_owned)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let lint_paths = updated_paths
+            .iter()
+            .filter(|relative| {
+                root.join(relative).is_file() && matcher.is_lintable(relative.as_path())
+            })
+            .cloned()
+            .collect();
+        Ok(Self {
+            lint_paths,
+            updated_paths,
+            full_update: false,
+        })
+    }
+}
+
+fn requires_full_run(root: &Path, config_path: &Path, config: &Config, paths: &[PathBuf]) -> bool {
+    let rules = root.join(&config.rules_dir);
+    let prompt = root.join(&config.system_prompt);
+    paths
+        .iter()
+        .any(|path| path == config_path || path == &prompt || path.starts_with(&rules))
 }
 
 fn event_paths(event: notify::Result<Event>) -> anyhow::Result<Vec<PathBuf>> {
@@ -220,6 +357,8 @@ struct Snapshot {
     root: PathBuf,
     line_base: u8,
     status: Status,
+    full_update: bool,
+    updated_paths: Vec<PathBuf>,
     diagnostics: Vec<Diagnostic>,
     stats: Option<Stats>,
     precondition: Option<PreconditionStatus>,
@@ -235,16 +374,18 @@ enum Status {
     Error,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct Diagnostic {
     path: PathBuf,
     rule_id: String,
+    rule_path: PathBuf,
+    message: String,
     severity: Severity,
     confidence: f64,
     regions: Vec<Region>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct Region {
     start_line: usize,
     end_line: usize,
@@ -270,10 +411,39 @@ struct PreconditionStatus {
 }
 
 impl Snapshot {
-    fn from_report(root: &Path, sequence: u64, report: RunReport) -> Self {
-        let status = if report.precondition_failure.is_some() {
+    fn from_report(
+        root: &Path,
+        sequence: u64,
+        report: RunReport,
+        updated_paths: Vec<PathBuf>,
+        full_update: bool,
+        state: &mut WatchState,
+    ) -> Self {
+        let precondition_failed = report.precondition_failure.is_some();
+        let (updated_paths, full_update) = if precondition_failed {
+            (Vec::new(), false)
+        } else {
+            for path in &updated_paths {
+                state.diagnostics.remove(path);
+            }
+            for violation in report.violations {
+                state
+                    .diagnostics
+                    .entry(violation.path.clone())
+                    .or_default()
+                    .push(Diagnostic::from(violation));
+            }
+            (updated_paths, full_update)
+        };
+        let diagnostics = state.all_diagnostics();
+        let errors = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .count();
+        let warnings = diagnostics.len() - errors;
+        let status = if precondition_failed {
             Status::PreconditionFailed
-        } else if report.violations.is_empty() {
+        } else if diagnostics.is_empty() {
             Status::Clean
         } else {
             Status::Violations
@@ -283,9 +453,9 @@ impl Snapshot {
             rules: report.rules,
             api_requests: report.api_requests,
             cache_hits: report.cache_hits,
-            violations: report.violations.len(),
-            errors: report.count(Severity::Error),
-            warnings: report.count(Severity::Warning),
+            violations: diagnostics.len(),
+            errors,
+            warnings,
         };
         Self {
             schema_version: PROTOCOL_VERSION,
@@ -294,18 +464,16 @@ impl Snapshot {
             root: root.to_owned(),
             line_base: 1,
             status,
-            diagnostics: report
-                .violations
-                .into_iter()
-                .map(Diagnostic::from)
-                .collect(),
+            full_update,
+            updated_paths,
+            diagnostics,
             stats: Some(stats),
             precondition: report.precondition_failure.map(PreconditionStatus::from),
             error: None,
         }
     }
 
-    fn error(root: &Path, sequence: u64, error: String) -> Self {
+    fn error(root: &Path, sequence: u64, error: String, state: &WatchState) -> Self {
         Self {
             schema_version: PROTOCOL_VERSION,
             kind: "snapshot",
@@ -313,7 +481,9 @@ impl Snapshot {
             root: root.to_owned(),
             line_base: 1,
             status: Status::Error,
-            diagnostics: Vec::new(),
+            full_update: false,
+            updated_paths: Vec::new(),
+            diagnostics: state.all_diagnostics(),
             stats: None,
             precondition: None,
             error: Some(error),
@@ -326,6 +496,8 @@ impl From<Violation> for Diagnostic {
         Self {
             path: value.path,
             rule_id: value.rule_id,
+            rule_path: value.rule_path,
+            message: value.message,
             severity: value.severity,
             confidence: value.confidence,
             regions: value
@@ -361,7 +533,12 @@ mod tests {
         let path = directory.path().join("state/diagnostics.json");
         write_snapshot(
             path.clone(),
-            Snapshot::error(directory.path(), 7, "temporary failure".into()),
+            Snapshot::error(
+                directory.path(),
+                7,
+                "temporary failure".into(),
+                &WatchState::default(),
+            ),
         )
         .await
         .unwrap();
@@ -418,5 +595,49 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    #[test]
+    fn partial_snapshot_preserves_unaffected_diagnostics() {
+        let root = Path::new("/project");
+        let mut state = WatchState::default();
+        let violation = |path: &str| Violation {
+            path: PathBuf::from(path),
+            rule_id: "rule".into(),
+            rule_path: ".jevlint-rules/rule.md".into(),
+            message: "Rule message".into(),
+            confidence: 0.9,
+            severity: Severity::Error,
+            regions: Vec::new(),
+        };
+        let report = |violations| RunReport {
+            files_checked: 2,
+            rules: 1,
+            api_requests: 0,
+            cache_hits: 2,
+            violations,
+            precondition_failure: None,
+        };
+
+        Snapshot::from_report(
+            root,
+            1,
+            report(vec![violation("a.ts"), violation("b.ts")]),
+            vec!["a.ts".into(), "b.ts".into()],
+            true,
+            &mut state,
+        );
+        let partial = Snapshot::from_report(
+            root,
+            2,
+            report(Vec::new()),
+            vec!["a.ts".into()],
+            false,
+            &mut state,
+        );
+
+        assert_eq!(partial.updated_paths, vec![PathBuf::from("a.ts")]);
+        assert_eq!(partial.diagnostics.len(), 1);
+        assert_eq!(partial.diagnostics[0].path, Path::new("b.ts"));
     }
 }

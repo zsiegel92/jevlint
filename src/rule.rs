@@ -12,6 +12,7 @@ use crate::hash;
 pub struct Rule {
     pub id: String,
     pub source_path: PathBuf,
+    pub message: String,
     pub markdown: String,
     pub hash: String,
     pub severity: Severity,
@@ -68,6 +69,7 @@ pub async fn load(
             severity: severities.get(&id).copied().unwrap_or_default(),
             id,
             hash: hash::bytes(&markdown),
+            message: message(&markdown),
             markdown,
             source_path,
         });
@@ -79,6 +81,33 @@ pub async fn load(
         );
     }
     Ok(rules)
+}
+
+fn message(markdown: &str) -> String {
+    let section = markdown
+        .lines()
+        .take_while(|line| !is_horizontal_rule(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_owned();
+    if section.is_empty() {
+        markdown.trim().to_owned()
+    } else {
+        section
+    }
+}
+
+fn is_horizontal_rule(line: &str) -> bool {
+    let compact = line.chars().filter(|character| !character.is_whitespace());
+    let mut count = 0;
+    for character in compact {
+        if character != '-' {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 3
 }
 
 #[cfg(test)]
@@ -95,5 +124,22 @@ mod tests {
 
         let unknown = BTreeMap::from([("typo".into(), Severity::Error)]);
         assert!(load(directory.path(), &unknown).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn uses_markdown_before_the_first_horizontal_rule_as_the_message() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("security.md"),
+            "# Unsafe boundary\n\nValidate external values.\n\n---\n\nLong instructions.",
+        )
+        .unwrap();
+
+        let rules = load(directory.path(), &BTreeMap::new()).await.unwrap();
+
+        assert_eq!(
+            rules[0].message,
+            "# Unsafe boundary\n\nValidate external values."
+        );
     }
 }

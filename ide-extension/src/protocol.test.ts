@@ -11,10 +11,14 @@ test("parses a warning with a line region", () => {
 			root: "/project",
 			line_base: 1,
 			status: "violations",
+			full_update: false,
+			updated_paths: ["src/main.ts"],
 			diagnostics: [
 				{
 					path: "src/main.ts",
 					rule_id: "clear-boundaries",
+					rule_path: ".jevlint-rules/clear-boundaries.md",
+					message: "# Keep boundaries clear",
 					severity: "warning",
 					confidence: 0.91,
 					regions: [{ start_line: 4, end_line: 6 }],
@@ -35,6 +39,7 @@ test("parses a warning with a line region", () => {
 	);
 	assert.equal(message.kind, "snapshot");
 	assert.equal(message.diagnostics[0]?.severity, "warning");
+	assert.equal(message.diagnostics[0]?.message, "# Keep boundaries clear");
 	assert.deepEqual(message.diagnostics[0]?.regions[0], {
 		startLine: 4,
 		endLine: 6,
@@ -44,7 +49,7 @@ test("parses a warning with a line region", () => {
 test("rejects an unknown severity", () => {
 	assert.throws(() =>
 		parseWatchMessage(
-			'{"schema_version":1,"kind":"snapshot","sequence":1,"root":"/","line_base":1,"status":"violations","diagnostics":[{"path":"x","rule_id":"r","severity":"info","confidence":1,"regions":[]}],"stats":null,"precondition":null,"error":null}',
+			'{"schema_version":1,"kind":"snapshot","sequence":1,"root":"/","line_base":1,"status":"violations","full_update":false,"updated_paths":["x"],"diagnostics":[{"path":"x","rule_id":"r","rule_path":".jevlint-rules/r.md","message":"Rule","severity":"info","confidence":1,"regions":[]}],"stats":null,"precondition":null,"error":null}',
 		),
 	);
 });

@@ -13,10 +13,25 @@ export class DiagnosticStore implements vscode.Disposable {
 	private readonly byWatcher = new Map<string, Map<string, FileDiagnostics>>();
 
 	update(watcherId: string, snapshot: Snapshot): void {
-		const next = groupDiagnostics(snapshot);
+		const incoming = groupDiagnostics(snapshot);
 		const previous = this.byWatcher.get(watcherId) ?? new Map();
-		this.byWatcher.set(watcherId, next);
-		this.refresh(new Set([...previous.keys(), ...next.keys()]));
+		const current = snapshot.fullUpdate ? new Map(incoming) : new Map(previous);
+		const updated = snapshot.fullUpdate
+			? new Set([...previous.keys(), ...incoming.keys()])
+			: new Set(
+					snapshot.updatedPaths.map((filePath) =>
+						path.resolve(snapshot.root, filePath),
+					),
+				);
+		if (!snapshot.fullUpdate) {
+			for (const filePath of updated) {
+				const replacement = incoming.get(filePath);
+				if (replacement === undefined) current.delete(filePath);
+				else current.set(filePath, replacement);
+			}
+		}
+		this.byWatcher.set(watcherId, current);
+		this.refresh(updated);
 	}
 
 	remove(watcherId: string): void {
@@ -57,13 +72,16 @@ function groupDiagnostics(snapshot: Snapshot): Map<string, FileDiagnostics> {
 		const existing = grouped.get(filePath)?.diagnostics ?? [];
 		grouped.set(filePath, {
 			uri,
-			diagnostics: [...existing, ...toDiagnostics(lint)],
+			diagnostics: [...existing, ...toDiagnostics(snapshot.root, lint)],
 		});
 	}
 	return grouped;
 }
 
-function toDiagnostics(lint: LintDiagnostic): vscode.Diagnostic[] {
+function toDiagnostics(
+	root: string,
+	lint: LintDiagnostic,
+): vscode.Diagnostic[] {
 	const regions =
 		lint.regions.length === 0 ? [{ startLine: 1, endLine: 1 }] : lint.regions;
 	return regions.map((region) => {
@@ -80,11 +98,22 @@ function toDiagnostics(lint: LintDiagnostic): vscode.Diagnostic[] {
 		const confidence = `${Math.round(lint.confidence * 100)}% confidence`;
 		const diagnostic = new vscode.Diagnostic(
 			range,
-			`${lint.ruleId} (${confidence})`,
+			`${plainMessage(lint.message)} (${confidence})`,
 			severity,
 		);
 		diagnostic.source = "jevlint";
-		diagnostic.code = lint.ruleId;
+		diagnostic.code = {
+			value: lint.ruleId,
+			target: vscode.Uri.file(path.resolve(root, lint.rulePath)),
+		};
 		return diagnostic;
 	});
+}
+
+function plainMessage(markdown: string): string {
+	return markdown
+		.split("\n")
+		.map((line) => line.trim().replace(/^#+\s*/, ""))
+		.filter((line) => line.length > 0)
+		.join(" ");
 }
