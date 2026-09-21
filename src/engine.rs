@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use anyhow::{Context, ensure};
 use serde::Serialize;
@@ -87,8 +91,29 @@ impl Engine {
             )
             .await?,
         );
+        validate_override_rules(&self.config, &rules)?;
+        let matcher = files::FileMatcher::new(&self.config)?;
+        let jobs = files
+            .into_iter()
+            .map(|path| {
+                let selected = matcher.rule_ids(&path);
+                let rule_indices = if matcher.uses_overrides() {
+                    rules
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, rule)| {
+                            selected.contains(rule.id.as_str()).then_some(index)
+                        })
+                        .collect()
+                } else {
+                    (0..rules.len()).collect()
+                };
+                FileJob { path, rule_indices }
+            })
+            .collect::<Vec<_>>();
+        let precondition_files = jobs.iter().map(|job| job.path.clone()).collect::<Vec<_>>();
         if let Some(precondition) = &self.precondition
-            && let Some(failure) = precondition.check(&self.root, &files).await?
+            && let Some(failure) = precondition.check(&self.root, &precondition_files).await?
         {
             return Ok(RunReport {
                 files_checked: 0,
@@ -114,18 +139,18 @@ impl Engine {
             provider: Arc::clone(&self.provider),
         });
 
-        let mut pending = files.into_iter();
+        let mut pending = jobs.into_iter();
         let mut tasks = JoinSet::new();
         let mut reports = Vec::new();
         for _ in 0..self.config.concurrency.get() {
-            if let Some(path) = pending.next() {
-                spawn_file(&mut tasks, Arc::clone(&context), path);
+            if let Some(job) = pending.next() {
+                spawn_file(&mut tasks, Arc::clone(&context), job);
             }
         }
         while let Some(result) = tasks.join_next().await {
             reports.push(result??);
-            if let Some(path) = pending.next() {
-                spawn_file(&mut tasks, Arc::clone(&context), path);
+            if let Some(job) = pending.next() {
+                spawn_file(&mut tasks, Arc::clone(&context), job);
             }
         }
 
@@ -141,12 +166,33 @@ impl Engine {
     }
 }
 
+fn validate_override_rules(config: &Config, rules: &[Rule]) -> anyhow::Result<()> {
+    let known = rules
+        .iter()
+        .map(|rule| rule.id.as_str())
+        .collect::<BTreeSet<_>>();
+    for (override_index, rule_override) in config.overrides.iter().enumerate() {
+        for rule_id in &rule_override.rules {
+            ensure!(
+                known.contains(rule_id.as_str()),
+                "overrides[{override_index}] references unknown rule {rule_id:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
 fn spawn_file(
     tasks: &mut JoinSet<anyhow::Result<FileReport>>,
     context: Arc<FileContext>,
-    path: PathBuf,
+    job: FileJob,
 ) {
-    tasks.spawn(async move { lint_file(context, path).await });
+    tasks.spawn(async move { lint_file(context, job).await });
+}
+
+struct FileJob {
+    path: PathBuf,
+    rule_indices: Vec<usize>,
 }
 
 struct FileContext {
@@ -188,14 +234,18 @@ struct LineCacheIdentity<'a> {
     schema: &'static str,
 }
 
-async fn lint_file(context: Arc<FileContext>, path: PathBuf) -> anyhow::Result<FileReport> {
+async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<FileReport> {
+    let FileJob { path, rule_indices } = job;
+    let rules = rule_indices
+        .iter()
+        .map(|&index| &context.rules[index])
+        .collect::<Vec<_>>();
     let display_path = path.to_string_lossy().replace('\\', "/");
     let source = tokio::fs::read_to_string(context.root.join(&path))
         .await
         .with_context(|| format!("failed to read {}", path.display()))?;
     let file_hash = hash::bytes(&source);
-    let keys = context
-        .rules
+    let keys = rules
         .iter()
         .map(|rule| {
             hash::key(
@@ -212,7 +262,7 @@ async fn lint_file(context: Arc<FileContext>, path: PathBuf) -> anyhow::Result<F
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let cached: Vec<Option<RuleAnswer>> = context.cache.get_many(keys.clone()).await?;
-    let mut answers = Vec::with_capacity(context.rules.len());
+    let mut answers = Vec::with_capacity(rules.len());
     let mut missing = Vec::new();
     let mut cache_hits = 0;
     for (index, answer) in cached.into_iter().enumerate() {
@@ -228,7 +278,7 @@ async fn lint_file(context: Arc<FileContext>, path: PathBuf) -> anyhow::Result<F
         api_requests += 1;
         let requested = missing
             .iter()
-            .map(|&index| context.rules[index].clone())
+            .map(|&index| (*rules[index]).clone())
             .collect::<Vec<_>>();
         let fresh = context
             .provider

@@ -58,12 +58,16 @@ for any other installation location:
 }
 ```
 
-`TYPESAFE_API_KEY` must also be available in the extension host environment.
-For remote SSH, containers, or Codespaces, install and configure the CLI in the
-remote workspace environment because this is a workspace extension.
+The CLI checks `TYPESAFE_API_KEY` first, then the config's
+`typesafe_api_key_file`, then `~/.config/jevlint/typesafe-api-key`. Key files
+contain only the raw key. They are read on each watch pass, so adding or
+replacing one does not require quitting or reloading VS Code. Saving a relevant
+file triggers a pass; **JevLint: Restart Watchers** is available when an
+immediate retry is useful. For remote SSH, containers, or Codespaces, install
+and configure the CLI in the remote environment because this is a workspace
+extension.
 
-Use **JevLint: Show Output** for process errors and precondition output, and
-**JevLint: Restart Watchers** after changing external environment variables.
+Use **JevLint: Show Output** for process errors and precondition output.
 Set `jevlint.trace.server` to `messages` or `verbose` for protocol debugging.
 
 Workspace Trust is respected: no project command or JevLint process starts in an

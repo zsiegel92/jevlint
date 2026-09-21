@@ -15,6 +15,11 @@ cache_dir = ".jevlint"
 model = "jev-latest"
 concurrency = 5
 request_timeout_seconds = 30
+typesafe_api_key_file = "~/.config/jevlint/typesafe-api-key"
+
+[[overrides]]
+files = ["*.ts", "*.tsx", "**/*.ts", "**/*.tsx"]
+rules = ["no-floating-promises", "no-unvalidated-boundary-cast"]
 
 [rule_severity]
 no-floating-promises = "error"

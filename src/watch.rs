@@ -89,9 +89,11 @@ pub async fn run(config_path: PathBuf, options: WatchOptions) -> anyhow::Result<
 
 async fn run_once(root: &Path, config: &Config, sequence: u64) -> Snapshot {
     let result = async {
-        let provider = Arc::new(JevClient::from_env(
+        let api_key = config.typesafe_api_key(root).await?;
+        let provider = Arc::new(JevClient::new(
             config.model.clone(),
             config.request_timeout(),
+            api_key,
         )?);
         Engine::new(root.to_owned(), config.clone(), provider)
             .run()
@@ -132,7 +134,7 @@ fn is_relevant(
             return true;
         }
         path.strip_prefix(root)
-            .is_ok_and(|relative| matcher.matches(relative))
+            .is_ok_and(|relative| matcher.is_lintable(relative))
     }))
 }
 

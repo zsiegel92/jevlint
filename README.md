@@ -15,11 +15,40 @@ atomic replacement and can safely be rerun after updating the source.
 
 Copy `.jevlintrc.example.toml` to `.jevlintrc.toml`, create `.jevlint-system.md`, and put one rule in each `.jevlint-rules/*.md` file. Rule filenames are stable rule IDs.
 
+Put the raw TypeSafe API key in `~/.config/jevlint/typesafe-api-key`, or set
+`TYPESAFE_API_KEY`. The environment variable takes precedence. A project may
+choose another file, relative to its config directory or absolute:
+
+```toml
+typesafe_api_key_file = "~/.config/jevlint/typesafe-api-key"
+```
+
+The key is read at the start of every run, including every watch pass, so it can
+be added or replaced without restarting VS Code. Then verify file selection and
+run the linter:
+
 ```sh
-export TYPESAFE_API_KEY=...
 cargo run --release -- --dry-run
 cargo run --release
 ```
+
+Assign rules to file groups with override blocks. Patterns are gitignore-style
+globs. A file receives the union of rules in every matching block, and
+`excluded_files` removes it from that block only:
+
+```toml
+[[overrides]]
+files = ["*.py", "**/*.py"]
+rules = ["python-boundaries"]
+
+[[overrides]]
+files = ["*.ts", "*.tsx", "**/*.ts", "**/*.tsx"]
+excluded_files = ["**/*.generated.ts"]
+rules = ["typescript-boundaries", "shared-api-contracts"]
+```
+
+When any override exists, files matching no override are not linted. Without
+overrides, every discovered file receives every rule for backward compatibility.
 
 The optional project precondition runs once before any Jev requests. A nonzero exit marks every selected file as skipped and exits with status 1. This conservative batch behavior works with commands such as `cargo check`, `tsc --noEmit`, Biome, or ESLint without repeatedly invoking them per file.
 
@@ -99,6 +128,8 @@ The cache is a transactional redb database under `.jevlint/cache.redb`. Verdict 
 Files are scheduled with bounded Tokio concurrency. One verdict request contains every uncached rule for a file. Only failed rules enter line detection, where every `(rule, line)` question is independently cached and requests are bounded by `max_questions_per_request`. Adjacent positive lines are printed as one region.
 
 File discovery and watching honor the configured matchers and Git ignore files.
+Rule-file edits are watched too; changing a rule invalidates only that rule's
+cached verdicts and refreshes diagnostics for open files on the next pass.
 LSP diagnostics and tool-specific per-file precondition adapters remain outside
 this pass; the reusable engine and provider/precondition traits are their
 integration boundaries.

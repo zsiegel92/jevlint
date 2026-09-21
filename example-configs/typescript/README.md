@@ -7,6 +7,8 @@ unvalidated casts at trust boundaries.
 
 Floating promises are configured as errors, while unvalidated boundary casts
 are warnings. Change their entries under `[rule_severity]` to suit the project.
+The `[[overrides]]` block binds those rules to TypeScript and TSX files; add
+more blocks when a mixed-language repository needs different rule sets.
 
 The precondition runs once for the whole project and requires both commands to
 succeed:

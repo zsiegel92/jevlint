@@ -19,6 +19,11 @@ cache_dir = ".jevlint"
 model = "jev-latest"
 concurrency = 5
 request_timeout_seconds = 30
+typesafe_api_key_file = "~/.config/jevlint/typesafe-api-key"
+
+[[overrides]]
+files = ["*.py", "*.pyi", "**/*.py", "**/*.pyi"]
+rules = ["no-broad-exception-swallowing", "no-unvalidated-dynamic-data"]
 
 [rule_severity]
 no-broad-exception-swallowing = "error"

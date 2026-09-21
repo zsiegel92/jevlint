@@ -81,9 +81,11 @@ async fn check(config_path: PathBuf, dry_run: bool) -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    let provider = Arc::new(JevClient::from_env(
+    let api_key = config.typesafe_api_key(&root).await?;
+    let provider = Arc::new(JevClient::new(
         config.model.clone(),
         config.request_timeout(),
+        api_key,
     )?);
     let engine = Engine::new(root, config, provider);
     let result = engine.run().await?;

@@ -6,6 +6,16 @@ cache_dir = ".jevlint"
 model = "jev-latest"
 concurrency = 5
 request_timeout_seconds = 30
+# Defaults to ~/.config/jevlint/typesafe-api-key when TYPESAFE_API_KEY is unset.
+# Relative paths are resolved from this configuration's directory.
+# typesafe_api_key_file = "~/.config/jevlint/typesafe-api-key"
+
+# When overrides are present, a file receives the union of rules from every
+# matching block. Files that match no block are not sent to Jev.
+# [[overrides]]
+# files = ["src/**/*.rs"]
+# excluded_files = ["src/generated/**"]
+# rules = ["security-boundary", "maintainability-note"]
 
 # Rules default to error. Override individual rule IDs when needed.
 # [rule_severity]

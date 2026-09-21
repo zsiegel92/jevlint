@@ -63,8 +63,7 @@ pub struct JevClient {
 }
 
 impl JevClient {
-    pub fn from_env(model: String, timeout: Duration) -> anyhow::Result<Self> {
-        let api_key = env::var("TYPESAFE_API_KEY").context("TYPESAFE_API_KEY is not set")?;
+    pub fn new(model: String, timeout: Duration, api_key: String) -> anyhow::Result<Self> {
         let base_url =
             env::var("TYPESAFE_BASE_URL").unwrap_or_else(|_| "https://api.typesafe.ai".into());
         let http = reqwest::Client::builder().timeout(timeout).build()?;
