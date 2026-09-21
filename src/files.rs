@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::BTreeMap,
     path::{Path, PathBuf},
 };
 
@@ -7,62 +7,59 @@ use anyhow::Context;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
 
-use crate::config::Config;
+use crate::{config::Config, rule::Severity};
 
 pub struct FileMatcher {
-    include: GlobSet,
     exclude: GlobSet,
-    overrides: Vec<OverrideMatcher>,
+    rule_sets: Vec<RuleSetMatcher>,
 }
 
-struct OverrideMatcher {
+struct RuleSetMatcher {
     files: GlobSet,
     excluded_files: GlobSet,
-    rules: Vec<String>,
+    rules: BTreeMap<String, Severity>,
 }
 
 impl FileMatcher {
     pub fn new(config: &Config) -> anyhow::Result<Self> {
-        let overrides = config
-            .overrides
+        let rule_sets = config
+            .rule_sets
             .iter()
-            .map(|rule_override| {
-                Ok(OverrideMatcher {
-                    files: build_globs(&rule_override.files)?,
-                    excluded_files: build_globs(&rule_override.excluded_files)?,
-                    rules: rule_override.rules.clone(),
+            .map(|rule_set| {
+                Ok(RuleSetMatcher {
+                    files: build_globs(&rule_set.files)?,
+                    excluded_files: build_globs(&rule_set.excluded_files)?,
+                    rules: rule_set.rules.clone(),
                 })
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(Self {
-            include: build_globs(&config.include)?,
             exclude: build_globs(&config.exclude)?,
-            overrides,
+            rule_sets,
         })
     }
 
-    pub fn matches(&self, relative_path: &Path) -> bool {
-        self.include.is_match(relative_path) && !self.exclude.is_match(relative_path)
-    }
-
     pub fn is_lintable(&self, relative_path: &Path) -> bool {
-        self.matches(relative_path)
-            && (self.overrides.is_empty() || !self.rule_ids(relative_path).is_empty())
+        !self.exclude.is_match(relative_path) && !self.rules_for(relative_path).is_empty()
     }
 
-    pub fn rule_ids<'a>(&'a self, relative_path: &Path) -> BTreeSet<&'a str> {
-        self.overrides
+    pub fn rules_for<'a>(&'a self, relative_path: &Path) -> BTreeMap<&'a str, Severity> {
+        if self.exclude.is_match(relative_path) {
+            return BTreeMap::new();
+        }
+        self.rule_sets
             .iter()
-            .filter(|rule_override| {
-                rule_override.files.is_match(relative_path)
-                    && !rule_override.excluded_files.is_match(relative_path)
+            .filter(|rule_set| {
+                rule_set.files.is_match(relative_path)
+                    && !rule_set.excluded_files.is_match(relative_path)
             })
-            .flat_map(|rule_override| rule_override.rules.iter().map(String::as_str))
+            .flat_map(|rule_set| {
+                rule_set
+                    .rules
+                    .iter()
+                    .map(|(id, severity)| (id.as_str(), *severity))
+            })
             .collect()
-    }
-
-    pub fn uses_overrides(&self) -> bool {
-        !self.overrides.is_empty()
     }
 }
 
@@ -99,29 +96,33 @@ fn build_globs(patterns: &[String]) -> anyhow::Result<GlobSet> {
 mod tests {
     use std::path::Path;
 
-    use crate::config::{Config, RuleOverride};
+    use std::collections::BTreeMap;
+
+    use crate::{
+        config::{Config, RuleSet},
+        rule::Severity,
+    };
 
     use super::FileMatcher;
 
     #[test]
-    fn selects_only_rules_from_matching_overrides() {
+    fn selects_rules_and_severities_from_matching_sets() {
         let config = Config {
-            include: vec!["**/*.py".into(), "**/*.ts".into()],
-            overrides: vec![
-                RuleOverride {
+            rule_sets: vec![
+                RuleSet {
                     files: vec!["**/*.py".into()],
                     excluded_files: vec!["generated/**".into()],
-                    rules: vec!["python-boundaries".into()],
+                    rules: BTreeMap::from([("python-boundaries".into(), Severity::Error)]),
                 },
-                RuleOverride {
+                RuleSet {
                     files: vec!["**/*.ts".into()],
                     excluded_files: Vec::new(),
-                    rules: vec!["typescript-boundaries".into()],
+                    rules: BTreeMap::from([("typescript-boundaries".into(), Severity::Warning)]),
                 },
-                RuleOverride {
+                RuleSet {
                     files: vec!["src/**".into()],
                     excluded_files: Vec::new(),
-                    rules: vec!["shared-source-rule".into()],
+                    rules: BTreeMap::from([("shared-source-rule".into(), Severity::Error)]),
                 },
             ],
             ..Config::default()
@@ -130,28 +131,33 @@ mod tests {
 
         assert_eq!(
             matcher
-                .rule_ids(Path::new("src/service.py"))
+                .rules_for(Path::new("src/service.py"))
                 .into_iter()
                 .collect::<Vec<_>>(),
-            vec!["python-boundaries", "shared-source-rule"]
+            vec![
+                ("python-boundaries", Severity::Error),
+                ("shared-source-rule", Severity::Error)
+            ]
         );
         assert_eq!(
             matcher
-                .rule_ids(Path::new("src/client.ts"))
+                .rules_for(Path::new("src/client.ts"))
                 .into_iter()
                 .collect::<Vec<_>>(),
-            vec!["shared-source-rule", "typescript-boundaries"]
+            vec![
+                ("shared-source-rule", Severity::Error),
+                ("typescript-boundaries", Severity::Warning)
+            ]
         );
         assert!(!matcher.is_lintable(Path::new("generated/models.py")));
         assert!(!matcher.is_lintable(Path::new("README.md")));
     }
 
     #[test]
-    fn no_overrides_applies_all_rules_to_selected_files() {
+    fn no_rule_sets_selects_nothing() {
         let matcher = FileMatcher::new(&Config::default()).unwrap();
 
-        assert!(matcher.is_lintable(Path::new("src/main.rs")));
-        assert!(!matcher.uses_overrides());
-        assert!(matcher.rule_ids(Path::new("src/main.rs")).is_empty());
+        assert!(!matcher.is_lintable(Path::new("src/main.rs")));
+        assert!(matcher.rules_for(Path::new("src/main.rs")).is_empty());
     }
 }

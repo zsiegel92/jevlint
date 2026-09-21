@@ -526,6 +526,7 @@ impl From<PreconditionFailure> for PreconditionStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::RuleSet;
 
     #[tokio::test]
     async fn atomically_writes_a_machine_readable_snapshot() {
@@ -557,7 +558,11 @@ mod tests {
         let root = Path::new("/project");
         let config_path = root.join(".jevlintrc.toml");
         let config = Config {
-            include: vec!["**/*.ts".into()],
+            rule_sets: vec![RuleSet {
+                files: vec!["**/*.ts".into()],
+                excluded_files: Vec::new(),
+                rules: BTreeMap::from([("security".into(), Severity::Error)]),
+            }],
             ..Config::default()
         };
         let options = WatchOptions {

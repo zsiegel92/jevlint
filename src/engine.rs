@@ -90,31 +90,24 @@ impl Engine {
     }
 
     pub async fn run_files(&self, files: Vec<PathBuf>) -> anyhow::Result<RunReport> {
-        let rules = Arc::new(
-            rule::load(
-                &self.root.join(&self.config.rules_dir),
-                &self.config.rule_severity,
-            )
-            .await?,
-        );
-        validate_override_rules(&self.config, &rules)?;
+        let rules = Arc::new(rule::load(&self.root.join(&self.config.rules_dir)).await?);
+        validate_rule_sets(&self.config, &rules)?;
         let matcher = files::FileMatcher::new(&self.config)?;
         let jobs = files
             .into_iter()
             .map(|path| {
-                let selected = matcher.rule_ids(&path);
-                let rule_indices = if matcher.uses_overrides() {
-                    rules
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, rule)| {
-                            selected.contains(rule.id.as_str()).then_some(index)
+                let selected = matcher.rules_for(&path);
+                let rules = rules
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, rule)| {
+                        selected.get(rule.id.as_str()).map(|severity| SelectedRule {
+                            index,
+                            severity: *severity,
                         })
-                        .collect()
-                } else {
-                    (0..rules.len()).collect()
-                };
-                FileJob { path, rule_indices }
+                    })
+                    .collect();
+                FileJob { path, rules }
             })
             .collect::<Vec<_>>();
         let precondition_files = jobs.iter().map(|job| job.path.clone()).collect::<Vec<_>>();
@@ -172,16 +165,16 @@ impl Engine {
     }
 }
 
-fn validate_override_rules(config: &Config, rules: &[Rule]) -> anyhow::Result<()> {
+fn validate_rule_sets(config: &Config, rules: &[Rule]) -> anyhow::Result<()> {
     let known = rules
         .iter()
         .map(|rule| rule.id.as_str())
         .collect::<BTreeSet<_>>();
-    for (override_index, rule_override) in config.overrides.iter().enumerate() {
-        for rule_id in &rule_override.rules {
+    for (set_index, rule_set) in config.rule_sets.iter().enumerate() {
+        for rule_id in rule_set.rules.keys() {
             ensure!(
                 known.contains(rule_id.as_str()),
-                "overrides[{override_index}] references unknown rule {rule_id:?}"
+                "rule_sets[{set_index}] references unknown rule {rule_id:?}"
             );
         }
     }
@@ -198,7 +191,12 @@ fn spawn_file(
 
 struct FileJob {
     path: PathBuf,
-    rule_indices: Vec<usize>,
+    rules: Vec<SelectedRule>,
+}
+
+struct SelectedRule {
+    index: usize,
+    severity: Severity,
 }
 
 struct FileContext {
@@ -241,10 +239,13 @@ struct LineCacheIdentity<'a> {
 }
 
 async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<FileReport> {
-    let FileJob { path, rule_indices } = job;
-    let rules = rule_indices
+    let FileJob {
+        path,
+        rules: selections,
+    } = job;
+    let rules = selections
         .iter()
-        .map(|&index| &context.rules[index])
+        .map(|selection| &context.rules[selection.index])
         .collect::<Vec<_>>();
     let display_path = path.to_string_lossy().replace('\\', "/");
     let source = tokio::fs::read_to_string(context.root.join(&path))
@@ -344,7 +345,11 @@ async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<Fi
                     .to_owned(),
                 message: rule.message.clone(),
                 confidence: answer.confidence,
-                severity: rule.severity,
+                severity: selections
+                    .iter()
+                    .find(|selection| context.rules[selection.index].id == answer.rule_id)
+                    .expect("answer rule was selected")
+                    .severity,
                 regions: regions(
                     locations
                         .get(&answer.rule_id)
@@ -484,7 +489,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::rule::Severity;
+    use crate::{config::RuleSet, rule::Severity};
     use async_trait::async_trait;
 
     struct FakeProvider {
@@ -552,14 +557,14 @@ mod tests {
         let provider = Arc::new(FakeProvider {
             calls: AtomicUsize::new(0),
         });
-        let config = Config {
-            include: vec!["*.rs".into()],
+        let mut config = Config {
+            rule_sets: vec![RuleSet {
+                files: vec!["*.rs".into()],
+                excluded_files: Vec::new(),
+                rules: BTreeMap::from([("safe".into(), Severity::Warning)]),
+            }],
             ..Config::default()
         };
-        let mut config = config;
-        config
-            .rule_severity
-            .insert("safe".into(), Severity::Warning);
         let engine = Engine::new(project.path().into(), config.clone(), provider.clone());
         let first = engine.run().await.unwrap();
         assert_eq!(first.api_requests, 2);
@@ -567,7 +572,9 @@ mod tests {
         assert!(!first.has_errors());
         assert_eq!(first.violations[0].regions[0].start, 1);
 
-        config.rule_severity.insert("safe".into(), Severity::Error);
+        config.rule_sets[0]
+            .rules
+            .insert("safe".into(), Severity::Error);
         let second = Engine::new(project.path().into(), config, provider.clone())
             .run()
             .await

@@ -1,4 +1,3 @@
-include = ["**/*.rs"]
 exclude = ["target/**", ".jevlint/**"]
 rules_dir = ".jevlint-rules"
 system_prompt = ".jevlint-system.md"
@@ -10,16 +9,13 @@ request_timeout_seconds = 30
 # Relative paths are resolved from this configuration's directory.
 # typesafe_api_key_file = "~/.config/jevlint/typesafe-api-key"
 
-# When overrides are present, a file receives the union of rules from every
-# matching block. Files that match no block are not sent to Jev.
-# [[overrides]]
-# files = ["src/**/*.rs"]
-# excluded_files = ["src/generated/**"]
-# rules = ["security-boundary", "maintainability-note"]
+[[rule_sets]]
+files = ["*.rs", "**/*.rs"]
+excluded_files = ["src/generated/**"]
 
-# Rules default to error. Override individual rule IDs when needed.
-# [rule_severity]
-# maintainability-note = "warning"
+[rule_sets.rules]
+security-boundary = "error"
+maintainability-note = "warning"
 
 [line_detection]
 enabled = true

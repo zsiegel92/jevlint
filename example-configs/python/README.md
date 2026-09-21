@@ -6,9 +6,8 @@ modules. Its semantic rules focus on swallowed exceptions and unchecked dynamic
 data at trust boundaries.
 
 Broad exception swallowing is configured as an error, while unvalidated dynamic
-data is a warning. Change their entries under `[rule_severity]` as needed.
-The `[[overrides]]` block binds those rules to Python source and stub files; add
-more blocks when a mixed-language repository needs different rule sets.
+data is a warning. The `[[rule_sets]]` block binds those rules and severities to
+Python source and stub files; add more blocks for additional file groups.
 
 The precondition runs once for the whole project and requires both commands to
 succeed:

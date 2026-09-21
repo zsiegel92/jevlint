@@ -13,11 +13,9 @@ use crate::rule::Severity;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub rules_dir: PathBuf,
-    pub rule_severity: BTreeMap<String, Severity>,
-    pub overrides: Vec<RuleOverride>,
+    pub rule_sets: Vec<RuleSet>,
     pub system_prompt: PathBuf,
     pub cache_dir: PathBuf,
     pub typesafe_api_key_file: Option<PathBuf>,
@@ -44,11 +42,11 @@ pub struct PreconditionConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RuleOverride {
+pub struct RuleSet {
     pub files: Vec<String>,
     #[serde(default)]
     pub excluded_files: Vec<String>,
-    pub rules: Vec<String>,
+    pub rules: BTreeMap<String, Severity>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -60,11 +58,9 @@ pub struct WatchConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            include: vec!["**/*.rs".into()],
             exclude: vec!["target/**".into(), ".jevlint/**".into()],
             rules_dir: ".jevlint-rules".into(),
-            rule_severity: BTreeMap::new(),
-            overrides: Vec::new(),
+            rule_sets: Vec::new(),
             system_prompt: ".jevlint-system.md".into(),
             cache_dir: ".jevlint".into(),
             typesafe_api_key_file: None,
@@ -108,8 +104,8 @@ impl Config {
 
     pub fn validate(&self) -> anyhow::Result<()> {
         ensure!(
-            !self.include.is_empty(),
-            "config must include at least one file glob"
+            !self.rule_sets.is_empty(),
+            "config requires a [[rule_sets]] block"
         );
         if let Some(precondition) = &self.precondition {
             ensure!(
@@ -117,14 +113,14 @@ impl Config {
                 "precondition.command cannot be empty"
             );
         }
-        for (index, rule_override) in self.overrides.iter().enumerate() {
+        for (index, rule_set) in self.rule_sets.iter().enumerate() {
             ensure!(
-                !rule_override.files.is_empty(),
-                "overrides[{index}].files cannot be empty"
+                !rule_set.files.is_empty(),
+                "rule_sets[{index}].files cannot be empty"
             );
             ensure!(
-                !rule_override.rules.is_empty(),
-                "overrides[{index}].rules cannot be empty"
+                !rule_set.rules.is_empty(),
+                "rule_sets[{index}].rules cannot be empty"
             );
         }
         Ok(())

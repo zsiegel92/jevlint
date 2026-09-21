@@ -32,34 +32,32 @@ cargo run --release -- --dry-run
 cargo run --release
 ```
 
-Assign rules to file groups with override blocks. Patterns are gitignore-style
-globs. A file receives the union of rules in every matching block, and
-`excluded_files` removes it from that block only:
+Every linted file and rule comes from a `[[rule_sets]]` block. Patterns are
+gitignore-style globs, severities live beside their rule IDs, and
+`excluded_files` removes files from that block only:
 
 ```toml
-[[overrides]]
+[[rule_sets]]
 files = ["*.py", "**/*.py"]
-rules = ["python-boundaries"]
 
-[[overrides]]
+[rule_sets.rules]
+python-boundaries = "error"
+
+[[rule_sets]]
 files = ["*.ts", "*.tsx", "**/*.ts", "**/*.tsx"]
 excluded_files = ["**/*.generated.ts"]
-rules = ["typescript-boundaries", "shared-api-contracts"]
+
+[rule_sets.rules]
+typescript-boundaries = "error"
+shared-api-contracts = "warning"
 ```
 
-When any override exists, files matching no override are not linted. Without
-overrides, every discovered file receives every rule for backward compatibility.
+A file receives the union of rules from its matching sets. If the same rule is
+listed more than once, the later matching set determines its severity. Files
+matching no rule set are not linted. There are no implicit rules or default file
+patterns.
 
 The optional project precondition runs once before any Jev requests. A nonzero exit marks every selected file as skipped and exits with status 1. This conservative batch behavior works with commands such as `cargo check`, `tsc --noEmit`, Biome, or ESLint without repeatedly invoking them per file.
-
-Rules are errors by default. Configure warning-only rules by their Markdown
-filename without the `.md` extension:
-
-```toml
-[rule_severity]
-security-boundary = "error"
-maintainability-note = "warning"
-```
 
 Unknown rule IDs and values other than `error` or `warning` are rejected.
 Warnings appear in human and machine output but do not make a check exit with

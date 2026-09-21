@@ -1,9 +1,6 @@
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail, ensure};
+use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::hash;
@@ -15,13 +12,11 @@ pub struct Rule {
     pub message: String,
     pub markdown: String,
     pub hash: String,
-    pub severity: Severity,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
-    #[default]
     Error,
     Warning,
 }
@@ -35,10 +30,7 @@ impl std::fmt::Display for Severity {
     }
 }
 
-pub async fn load(
-    directory: &Path,
-    severities: &BTreeMap<String, Severity>,
-) -> anyhow::Result<Vec<Rule>> {
+pub async fn load(directory: &Path) -> anyhow::Result<Vec<Rule>> {
     let mut entries = tokio::fs::read_dir(directory)
         .await
         .with_context(|| format!("failed to read rules directory {}", directory.display()))?;
@@ -66,19 +58,12 @@ pub async fn load(
             .to_string_lossy()
             .into_owned();
         rules.push(Rule {
-            severity: severities.get(&id).copied().unwrap_or_default(),
             id,
             hash: hash::bytes(&markdown),
             message: message(&markdown),
             markdown,
             source_path,
         });
-    }
-    for id in severities.keys() {
-        ensure!(
-            rules.iter().any(|rule| &rule.id == id),
-            "severity configured for unknown rule {id:?}"
-        );
     }
     Ok(rules)
 }
@@ -115,15 +100,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn applies_severity_and_rejects_unknown_rule_ids() {
+    async fn loads_markdown_rules() {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("security.md"), "Check security.").unwrap();
-        let severities = BTreeMap::from([("security".into(), Severity::Warning)]);
-        let rules = load(directory.path(), &severities).await.unwrap();
-        assert_eq!(rules[0].severity, Severity::Warning);
-
-        let unknown = BTreeMap::from([("typo".into(), Severity::Error)]);
-        assert!(load(directory.path(), &unknown).await.is_err());
+        let rules = load(directory.path()).await.unwrap();
+        assert_eq!(rules[0].id, "security");
     }
 
     #[tokio::test]
@@ -135,7 +116,7 @@ mod tests {
         )
         .unwrap();
 
-        let rules = load(directory.path(), &BTreeMap::new()).await.unwrap();
+        let rules = load(directory.path()).await.unwrap();
 
         assert_eq!(
             rules[0].message,
