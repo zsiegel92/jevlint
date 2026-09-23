@@ -2,3 +2,4 @@
 /.jevlint/
 .env
 scratch/
+**/.DS_Store
