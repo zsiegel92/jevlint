@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsStr,
     fs::OpenOptions,
     io::Write,
     path::{Path, PathBuf},
@@ -17,7 +18,7 @@ use jevlint::{
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
-    #[arg(long, global = true, default_value = ".jevlintrc.json")]
+    #[arg(long, global = true, default_value = ".jevlintrc.jsonc")]
     config: PathBuf,
     #[arg(long)]
     dry_run: bool,
@@ -33,7 +34,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create a starter JSON config, prompt, and rule in the current project.
+    /// Create a starter JSONC config, prompt, and rule in the current project.
     Init,
     /// Print the JSON Schema derived from the Rust config types.
     Schema {
@@ -126,6 +127,18 @@ fn schema(output: Option<&Path>) -> anyhow::Result<()> {
 }
 
 fn init(path: &Path) -> anyhow::Result<()> {
+    ensure!(
+        path.extension() == Some(OsStr::new("jsonc")),
+        "config path must end in .jsonc: {}",
+        path.display()
+    );
+    let old_path = path.with_extension("json");
+    ensure!(
+        !old_path.exists(),
+        "rename {} to {} before running init",
+        old_path.display(),
+        path.display()
+    );
     let root = path.parent().context("config path has no parent")?;
     let mut config = Config::default();
     config.rule_sets = vec![jevlint::config::RuleSet {

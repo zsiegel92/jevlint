@@ -1,11 +1,13 @@
 use std::{
     collections::BTreeMap,
+    ffi::OsStr,
     num::NonZeroUsize,
     path::{Path, PathBuf},
     time::Duration,
 };
 
-use anyhow::{Context, ensure};
+use anyhow::{Context, anyhow, ensure};
+use jsonc_parser::{ParseOptions, parse_to_serde_value};
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 
@@ -128,10 +130,32 @@ impl Default for WatchConfig {
 
 impl Config {
     pub async fn load(path: &Path) -> anyhow::Result<Self> {
+        ensure!(
+            path.extension() == Some(OsStr::new("jsonc")),
+            "config path must end in .jsonc: {}",
+            path.display()
+        );
         let text = tokio::fs::read_to_string(path)
             .await
+            .map_err(|error| {
+                let old_path = path.with_extension("json");
+                if error.kind() == std::io::ErrorKind::NotFound && old_path.is_file() {
+                    anyhow!("rename {} to {}", old_path.display(), path.display())
+                } else {
+                    error.into()
+                }
+            })
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let config: Self = serde_json::from_str(&text)
+        let options = ParseOptions {
+            allow_comments: true,
+            allow_trailing_commas: true,
+            allow_loose_object_property_names: false,
+            allow_missing_commas: false,
+            allow_single_quoted_strings: false,
+            allow_hexadecimal_numbers: false,
+            allow_unary_plus_numbers: false,
+        };
+        let config: Self = parse_to_serde_value(&text, &options)
             .with_context(|| format!("invalid config {}", path.display()))?;
         config.validate()?;
         Ok(config)
@@ -273,5 +297,44 @@ mod tests {
         config.validate().unwrap();
         assert_eq!(config.rule_sets[0].warn["example"], 1.4);
         assert!(serde_json::from_str::<Config>(r#"{"rule_sets":[],"typo":true}"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn load_accepts_comments_and_trailing_commas() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(".jevlintrc.jsonc");
+        std::fs::write(
+            &path,
+            r#"{
+                // Keep this URL intact.
+                "model": "https://example.com/model",
+                "rule_sets": [{
+                    "match": ["*.rs",],
+                    /* A rule with a trailing comma. */
+                    "error": { "safe": 0.8, },
+                }],
+            }"#,
+        )
+        .unwrap();
+
+        let config = Config::load(&path).await.unwrap();
+        assert_eq!(config.model, "https://example.com/model");
+        assert_eq!(config.rule_sets[0].error["safe"], 0.8);
+    }
+
+    #[tokio::test]
+    async fn load_rejects_other_json_extensions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(".jevlintrc.jsonc");
+        std::fs::write(&path, "{ rule_sets: [] }").unwrap();
+        assert!(Config::load(&path).await.is_err());
+
+        let json_path = directory.path().join(".jevlintrc.json");
+        std::fs::write(&json_path, r#"{"rule_sets":[]}"#).unwrap();
+        assert!(Config::load(&json_path).await.is_err());
+
+        std::fs::remove_file(&path).unwrap();
+        let error = Config::load(&path).await.unwrap_err();
+        assert!(format!("{error:#}").contains("rename"));
     }
 }

@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn watches_sources_and_linter_inputs_but_not_cache_files() {
         let root = Path::new("/project");
-        let config_path = root.join(".jevlintrc.json");
+        let config_path = root.join(".jevlintrc.jsonc");
         let config = Config {
             rule_sets: vec![RuleSet {
                 patterns: vec!["**/*.ts".into()],

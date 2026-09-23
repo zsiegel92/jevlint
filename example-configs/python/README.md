@@ -25,7 +25,7 @@ tools through `uv`, replace the command with, for example:
 "precondition": { "command": ["sh", "-c", "uv run pyright && uv run ruff check ."] }
 ```
 
-Copy `.jevlintrc.json`, `.jevlint-system.md`, and `.jevlint-rules/` to the root
+Copy `.jevlintrc.jsonc`, `.jevlint-system.md`, and `.jevlint-rules/` to the root
 of the target project. Relative paths and the precondition working directory are
 based on the folder containing the configuration file.
 

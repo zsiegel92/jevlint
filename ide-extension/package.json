@@ -21,8 +21,8 @@
 	"main": "./dist/extension.cjs",
 	"activationEvents": [
 		"onStartupFinished",
-		"workspaceContains:.jevlintrc.json",
-		"workspaceContains:**/.jevlintrc.json"
+		"workspaceContains:.jevlintrc.jsonc",
+		"workspaceContains:**/.jevlintrc.jsonc"
 	],
 	"extensionKind": [
 		"workspace"
@@ -30,7 +30,7 @@
 	"contributes": {
 		"jsonValidation": [
 			{
-				"fileMatch": ".jevlintrc.json",
+				"fileMatch": ".jevlintrc.jsonc",
 				"url": "./schema/jevlint.schema.json"
 			}
 		],

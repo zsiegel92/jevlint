@@ -20,11 +20,11 @@ pnpm exec biome check .
 Install TypeScript and Biome in the target project before using it. A failure in
 either command skips Jev linting for every selected file.
 
-Copy `.jevlintrc.json`, `.jevlint-system.md`, and `.jevlint-rules/` to the root
+Copy `.jevlintrc.jsonc`, `.jevlint-system.md`, and `.jevlint-rules/` to the root
 of the target project, or invoke the example directly from this repository:
 
 ```sh
-jevlint --config example-configs/typescript/.jevlintrc.json --dry-run
+jevlint --config example-configs/typescript/.jevlintrc.jsonc --dry-run
 ```
 
 Relative paths and the precondition working directory are based on the folder

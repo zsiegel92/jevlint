@@ -1,6 +1,6 @@
 # JevLint for VS Code
 
-This extension runs one `jevlint watch` process for every `.jevlintrc.json`
+This extension runs one `jevlint watch` process for every `.jevlintrc.jsonc`
 found in a trusted workspace. It converts the versioned JSON Lines stream into
 native VS Code diagnostics.
 
@@ -49,7 +49,7 @@ pnpm watch
 
 ## Configuration
 
-The extension searches every workspace folder for `.jevlintrc.json`. It contributes the Rust-derived JSON Schema to VS Code for validation and completion, without writing workspace settings. JevLint
+The extension searches every workspace folder for `.jevlintrc.jsonc`. It contributes the Rust-derived JSON Schema to VS Code for validation and completion, without writing workspace settings. JevLint
 paths remain relative to the folder containing that file, exactly as they are in
 the CLI.
 

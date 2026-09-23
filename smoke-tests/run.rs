@@ -162,8 +162,11 @@ fn main() -> Result<()> {
     }
 
     let root = temporary.path().join("clean");
-    let config_path = root.join("jevlint.smoke.json");
-    let mut config: Value = serde_json::from_slice(&fs::read(&config_path)?)?;
+    let config_path = root.join("jevlint.smoke.jsonc");
+    let mut config: Value = jsonc_parser::parse_to_serde_value(
+        &fs::read_to_string(&config_path)?,
+        &Default::default(),
+    )?;
     config["precondition"] = json!({ "command": ["sh", "-c", "exit 1"] });
     fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
     let calls = server.calls.load(Ordering::Relaxed);
@@ -203,7 +206,7 @@ fn prepare(source: &Path, destination: &Path) -> Result<()> {
     for fixture in ["clean", "violations"] {
         let target = destination.join(fixture);
         fs::create_dir(&target)?;
-        for name in SOURCES.into_iter().chain(["jevlint.smoke.json"]) {
+        for name in SOURCES.into_iter().chain(["jevlint.smoke.jsonc"]) {
             fs::copy(source.join(fixture).join(name), target.join(name))?;
         }
     }
@@ -214,7 +217,7 @@ fn check(cli: &Path, root: &Path, server: &MockJev, force_fresh: bool) -> Result
     let mut command = Command::new(cli);
     command
         .arg("--config")
-        .arg(root.join("jevlint.smoke.json"))
+        .arg(root.join("jevlint.smoke.jsonc"))
         .arg("--json");
     if force_fresh {
         command.arg("--force-fresh");

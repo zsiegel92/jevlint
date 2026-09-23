@@ -13,7 +13,7 @@ Build an optimized binary and install it to `~/.local/bin`:
 Set `JEVLINT_INSTALL_DIR` to override the destination. The installer uses an
 atomic replacement and can safely be rerun after updating the source.
 
-Run `jevlint init` to create `.jevlintrc.json`, a system prompt, and a starter Markdown rule. Rule filenames are stable rule IDs. The installer also places a generated JSON Schema at `~/.local/share/jevlint/jevlint.schema.json`; `init` adds a `$schema` URI when that installed file is available. The VS Code extension associates the schema with every `.jevlintrc.json` without changing workspace settings.
+Run `jevlint init` to create `.jevlintrc.jsonc`, a system prompt, and a starter Markdown rule. The config accepts `//` and `/* ... */` comments and trailing commas. Rename existing `.jevlintrc.json` files to `.jevlintrc.jsonc`. Rule filenames are stable rule IDs. The installer also places a generated JSON Schema at `~/.local/share/jevlint/jevlint.schema.json`; `init` adds a `$schema` URI when that installed file is available. The VS Code extension associates the schema with `.jevlintrc.jsonc` without changing workspace settings.
 
 Put the raw TypeSafe API key in `~/.config/jevlint/typesafe-api-key`, or set
 `TYPESAFE_API_KEY`. The environment variable takes precedence. A project may
@@ -101,7 +101,7 @@ second pass; and single-file cache invalidation after an edit. The runner
 copies fixtures into a temporary directory, leaving the repository free of
 smoke-test cache files. It is not part of `cargo test`.
 
-Fixture configs are named `jevlint.smoke.json`, not `.jevlintrc.json`, so the
+Fixture configs are named `jevlint.smoke.jsonc`, not `.jevlintrc.jsonc`, so the
 VS Code extension does not discover or watch them. The runner passes each config
 explicitly via `--config`. One-shot checks also support `--json` for a typed
 `RunReport` on stdout, with the usual 0/1/2 exit statuses.
@@ -117,7 +117,7 @@ Install the bundled VS Code extension directly from this repository:
 ./ide-extension/install.sh
 ```
 
-It discovers `.jevlintrc.json` files, runs the watch protocol, and publishes
+It discovers `.jevlintrc.jsonc` files, runs the watch protocol, and publishes
 native error and warning diagnostics. See
 [`ide-extension/README.md`](ide-extension/README.md) for development commands
 and settings.
@@ -163,7 +163,7 @@ the file option is useful for simpler integrations and debugging. See
 
 The cache is a transactional redb database under `.jevlint/cache.redb`. Verdict keys include the normalized relative path, file content, individual rule content, system prompt, requested model, response schema, and tool namespace. Line-location entries add the line number and use a separate schema namespace. Writes are atomic; reads and writes are batched per file.
 
-Files are scheduled with bounded Tokio concurrency. One verdict request contains every uncached rule for a file. Only failed rules enter line detection, where every `(rule, line)` question is independently cached and requests are bounded by `max_questions_per_request`. Adjacent positive lines are printed as one region.
+Files are scheduled with bounded Tokio concurrency. At most two Jev requests run at once across local `jevlint` processes, including both verdict and line detection requests. One verdict request contains every uncached rule for a file. Only failed rules enter line detection, where every `(rule, line)` question is independently cached and requests are bounded by `max_questions_per_request`. Adjacent positive lines are printed as one region.
 
 Ordinary watch events analyze only the affected files and preserve all other
 diagnostics. Changes to the config, system prompt, or a rule can affect the

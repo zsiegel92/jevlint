@@ -12,6 +12,7 @@ blake3 = "1.8"
 clap = { version = "4.5", features = ["derive"] }
 globset = "0.4"
 ignore = "0.4"
+jsonc-parser = { version = "0.33", features = ["serde"] }
 notify = "8.2"
 redb = "3.0"
 schemars = "1.2"

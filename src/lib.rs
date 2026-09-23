@@ -6,6 +6,7 @@ pub mod hash;
 pub mod jev;
 pub mod precondition;
 pub mod report;
+mod request_limit;
 pub mod rule;
 pub mod watch;
 

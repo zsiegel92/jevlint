@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::rule::Rule;
+use crate::{request_limit, rule::Rule};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -81,6 +81,7 @@ impl JevClient {
         state: Value,
         questions: BTreeMap<String, Value>,
     ) -> anyhow::Result<ApiResponse> {
+        let _permit = request_limit::acquire().await?;
         let response = self
             .http
             .post(format!("{}/v1/systemone", self.base_url))
