@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::engine::{LineRegion, RunReport};
+use crate::engine::{LineRegion, RunReport, Violation};
 use crate::rule::Severity;
 
 pub fn print(report: &RunReport, mut output: impl Write, mut errors: impl Write) -> io::Result<()> {
@@ -21,7 +21,12 @@ pub fn print(report: &RunReport, mut output: impl Write, mut errors: impl Write)
         }
         return Ok(());
     }
-    for violation in &report.violations {
+    print_violations(&report.violations, &mut output)?;
+    print_summary(report, output)
+}
+
+pub fn print_violations(violations: &[Violation], mut output: impl Write) -> io::Result<()> {
+    for violation in violations {
         if violation.regions.is_empty() {
             writeln!(
                 output,
@@ -49,6 +54,10 @@ pub fn print(report: &RunReport, mut output: impl Write, mut errors: impl Write)
             }
         }
     }
+    Ok(())
+}
+
+pub fn print_summary(report: &RunReport, mut output: impl Write) -> io::Result<()> {
     writeln!(
         output,
         "jevlint: {} files, {} rules, {} API requests, {} cached, {} errors, {} warnings",

@@ -1,6 +1,6 @@
 import path from "node:path";
 import * as vscode from "vscode";
-import type { LintDiagnostic, Snapshot } from "./protocol.js";
+import type { FileResult, LintDiagnostic, Snapshot } from "./protocol.js";
 
 type FileDiagnostics = {
 	uri: vscode.Uri;
@@ -13,7 +13,7 @@ export class DiagnosticStore implements vscode.Disposable {
 	private readonly byWatcher = new Map<string, Map<string, FileDiagnostics>>();
 
 	update(watcherId: string, snapshot: Snapshot): void {
-		const incoming = groupDiagnostics(snapshot);
+		const incoming = groupDiagnostics(snapshot.root, snapshot.diagnostics);
 		const previous = this.byWatcher.get(watcherId) ?? new Map();
 		const current = snapshot.fullUpdate ? new Map(incoming) : new Map(previous);
 		const updated = snapshot.fullUpdate
@@ -32,6 +32,19 @@ export class DiagnosticStore implements vscode.Disposable {
 		}
 		this.byWatcher.set(watcherId, current);
 		this.refresh(updated);
+	}
+
+	updateFile(watcherId: string, result: FileResult): void {
+		const filePath = path.resolve(result.root, result.path);
+		const current =
+			this.byWatcher.get(watcherId) ?? new Map<string, FileDiagnostics>();
+		const replacement = groupDiagnostics(result.root, result.diagnostics).get(
+			filePath,
+		);
+		if (replacement === undefined) current.delete(filePath);
+		else current.set(filePath, replacement);
+		this.byWatcher.set(watcherId, current);
+		this.refresh(new Set([filePath]));
 	}
 
 	remove(watcherId: string): void {
@@ -64,15 +77,18 @@ export class DiagnosticStore implements vscode.Disposable {
 	}
 }
 
-function groupDiagnostics(snapshot: Snapshot): Map<string, FileDiagnostics> {
+function groupDiagnostics(
+	root: string,
+	diagnostics: readonly LintDiagnostic[],
+): Map<string, FileDiagnostics> {
 	const grouped = new Map<string, FileDiagnostics>();
-	for (const lint of snapshot.diagnostics) {
-		const filePath = path.resolve(snapshot.root, lint.path);
+	for (const lint of diagnostics) {
+		const filePath = path.resolve(root, lint.path);
 		const uri = vscode.Uri.file(filePath);
 		const existing = grouped.get(filePath)?.diagnostics ?? [];
 		grouped.set(filePath, {
 			uri,
-			diagnostics: [...existing, ...toDiagnostics(snapshot.root, lint)],
+			diagnostics: [...existing, ...toDiagnostics(root, lint)],
 		});
 	}
 	return grouped;

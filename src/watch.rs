@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     Config, Engine,
-    engine::{RunReport, Violation},
+    engine::{FileProgress, RunReport, Violation},
     files::{self, FileMatcher},
     jev::JevClient,
     precondition::PreconditionFailure,
@@ -24,6 +24,7 @@ const PROTOCOL_VERSION: u8 = 1;
 pub struct WatchOptions {
     pub snapshot_file: Option<PathBuf>,
     pub stdout: bool,
+    pub stream: bool,
 }
 
 pub async fn run(config_path: PathBuf, options: WatchOptions) -> anyhow::Result<()> {
@@ -46,7 +47,7 @@ pub async fn run(config_path: PathBuf, options: WatchOptions) -> anyhow::Result<
     emit_started(sequence, "initial", &[], &options)?;
     let initial = RunSelection::full(&root, &config, &state)?;
     emit_snapshot(
-        run_once(&root, &config, sequence, initial, &mut state).await,
+        run_once(&root, &config, sequence, initial, &mut state, &options).await,
         &options,
     )
     .await?;
@@ -105,7 +106,7 @@ pub async fn run(config_path: PathBuf, options: WatchOptions) -> anyhow::Result<
             }
         };
         emit_snapshot(
-            run_once(&root, &config, sequence, selection, &mut state).await,
+            run_once(&root, &config, sequence, selection, &mut state, &options).await,
             &options,
         )
         .await?;
@@ -120,6 +121,7 @@ async fn run_once(
     sequence: u64,
     selection: RunSelection,
     state: &mut WatchState,
+    options: &WatchOptions,
 ) -> Snapshot {
     let RunSelection {
         lint_paths,
@@ -150,9 +152,16 @@ async fn run_once(
             config.request_timeout(),
             api_key,
         )?);
-        Engine::new(root.to_owned(), config.clone(), provider)
-            .run_files(lint_paths)
-            .await
+        let engine = Engine::new(root.to_owned(), config.clone(), provider);
+        if options.stream && options.stdout {
+            engine
+                .run_files_with_progress(lint_paths, |file| {
+                    write_json_line(&FileResult::new(root, sequence, file))
+                })
+                .await
+        } else {
+            engine.run_files(lint_paths).await
+        }
     }
     .await;
     match result {
@@ -350,6 +359,34 @@ struct Started<'a> {
 }
 
 #[derive(Serialize)]
+struct FileResult {
+    schema_version: u8,
+    kind: &'static str,
+    sequence: u64,
+    root: PathBuf,
+    path: PathBuf,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl FileResult {
+    fn new(root: &Path, sequence: u64, file: &FileProgress) -> Self {
+        Self {
+            schema_version: PROTOCOL_VERSION,
+            kind: "file_result",
+            sequence,
+            root: root.to_owned(),
+            path: file.path.clone(),
+            diagnostics: file
+                .violations
+                .iter()
+                .cloned()
+                .map(Diagnostic::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct Snapshot {
     schema_version: u8,
     kind: &'static str,
@@ -481,7 +518,7 @@ impl Snapshot {
             root: root.to_owned(),
             line_base: 1,
             status: Status::Error,
-            full_update: false,
+            full_update: true,
             updated_paths: Vec::new(),
             diagnostics: state.all_diagnostics(),
             stats: None,
@@ -551,6 +588,29 @@ mod tests {
         assert_eq!(value["sequence"], 7);
         assert_eq!(value["status"], "error");
         assert_eq!(value["diagnostics"], serde_json::json!([]));
+        assert_eq!(value["full_update"], true);
+    }
+
+    #[test]
+    fn file_result_contains_only_its_file() {
+        let file = FileProgress {
+            path: "src/a.ts".into(),
+            api_requests: 1,
+            cache_hits: 0,
+            violations: vec![Violation {
+                path: "src/a.ts".into(),
+                rule_id: "rule".into(),
+                rule_path: ".jevlint-rules/rule.md".into(),
+                message: "Rule".into(),
+                confidence: 0.9,
+                severity: Severity::Error,
+                regions: Vec::new(),
+            }],
+        };
+        let value = serde_json::to_value(FileResult::new(Path::new("/project"), 3, &file)).unwrap();
+        assert_eq!(value["kind"], "file_result");
+        assert_eq!(value["path"], "src/a.ts");
+        assert_eq!(value["diagnostics"][0]["path"], "src/a.ts");
     }
 
     #[test]
@@ -569,6 +629,7 @@ mod tests {
         let options = WatchOptions {
             snapshot_file: None,
             stdout: true,
+            stream: false,
         };
 
         assert!(

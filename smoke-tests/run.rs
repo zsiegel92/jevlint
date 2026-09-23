@@ -1,13 +1,14 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc,
     },
     thread,
     time::Duration,
@@ -161,6 +162,10 @@ fn main() -> Result<()> {
         }
     }
 
+    check_cli_stream(&cli, &temporary.path().join("violations"), &server)?;
+    check_watch_output(&cli, &temporary.path().join("violations"), &server, false)?;
+    check_watch_output(&cli, &temporary.path().join("violations"), &server, true)?;
+
     let root = temporary.path().join("clean");
     let config_path = root.join("jevlint.smoke.jsonc");
     let mut config: Value = jsonc_parser::parse_to_serde_value(
@@ -187,6 +192,101 @@ fn main() -> Result<()> {
         "precondition still reached provider"
     );
     println!("precondition: six files skipped without provider calls");
+    Ok(())
+}
+
+fn check_cli_stream(cli: &Path, root: &Path, server: &MockJev) -> Result<()> {
+    let output = Command::new(cli)
+        .arg("--config")
+        .arg(root.join("jevlint.smoke.jsonc"))
+        .arg("--stream")
+        .env("TYPESAFE_API_KEY", "smoke-key")
+        .env("TYPESAFE_BASE_URL", &server.url)
+        .output()?;
+    ensure!(
+        output.status.code() == Some(1),
+        "streamed CLI exit status changed"
+    );
+    let text = String::from_utf8(output.stdout)?;
+    ensure!(
+        text.contains("alpha.py:2:"),
+        "streamed CLI omitted a finding"
+    );
+    ensure!(
+        text.contains("jevlint: 6 files"),
+        "streamed CLI omitted its summary"
+    );
+    println!("CLI stream: findings and final summary received");
+    Ok(())
+}
+
+fn check_watch_output(cli: &Path, root: &Path, server: &MockJev, stream: bool) -> Result<()> {
+    let mut command = Command::new(cli);
+    command
+        .arg("watch")
+        .arg("--config")
+        .arg(root.join("jevlint.smoke.jsonc"))
+        .env("TYPESAFE_API_KEY", "smoke-key")
+        .env("TYPESAFE_BASE_URL", &server.url)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if stream {
+        command.arg("--stream");
+    }
+    let mut child = command.spawn()?;
+    let stdout = child.stdout.take().context("watch stdout was not piped")?;
+    let (sender, receiver) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let result = (|| -> Result<()> {
+        let mut started = false;
+        let mut completed = BTreeSet::new();
+        loop {
+            let line = receiver.recv_timeout(Duration::from_secs(30))??;
+            let value: Value = serde_json::from_str(&line)?;
+            match value["kind"].as_str() {
+                Some("run_started") => started = true,
+                Some("file_result") => {
+                    ensure!(started, "file result arrived before run_started");
+                    completed.insert(
+                        value["path"]
+                            .as_str()
+                            .context("file result has no path")?
+                            .to_owned(),
+                    );
+                }
+                Some("snapshot") => {
+                    ensure!(
+                        completed.len() == if stream { 6 } else { 0 },
+                        "watch emitted the wrong number of file results"
+                    );
+                    ensure!(
+                        value["diagnostics"]
+                            .as_array()
+                            .is_some_and(|items| items.len() == 3),
+                        "final snapshot has the wrong diagnostics"
+                    );
+                    break;
+                }
+                other => anyhow::bail!("unexpected watch message kind {other:?}"),
+            }
+        }
+        Ok(())
+    })();
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = reader.join();
+    result?;
+    println!(
+        "watch {}: {} file results before final snapshot",
+        if stream { "stream" } else { "default" },
+        if stream { 6 } else { 0 }
+    );
     Ok(())
 }
 

@@ -53,3 +53,29 @@ test("rejects an unknown severity", () => {
 		),
 	);
 });
+
+test("parses a streamed file result", () => {
+	const message = parseWatchMessage(
+		JSON.stringify({
+			schema_version: 1,
+			kind: "file_result",
+			sequence: 4,
+			root: "/project",
+			path: "src/main.ts",
+			diagnostics: [
+				{
+					path: "src/main.ts",
+					rule_id: "clear-boundaries",
+					rule_path: ".jevlint-rules/clear-boundaries.md",
+					message: "# Keep boundaries clear",
+					severity: "error",
+					confidence: 0.91,
+					regions: [{ start_line: 4, end_line: 4 }],
+				},
+			],
+		}),
+	);
+	assert.equal(message.kind, "file_result");
+	assert.equal(message.path, "src/main.ts");
+	assert.equal(message.diagnostics[0]?.severity, "error");
+});

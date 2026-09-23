@@ -28,9 +28,13 @@ be added or replaced without restarting VS Code. Then verify file selection and
 run the linter:
 
 ```sh
-cargo run --release -- --dry-run
-cargo run --release
+cargo run --release --bin jevlint -- --dry-run
+cargo run --release --bin jevlint
 ```
+
+Use `jevlint --stream` to print each file's findings when that file finishes,
+followed by the usual summary. The default output and `--json` remain complete
+reports; `--stream` and `--json` cannot be combined.
 
 Every linted file and rule comes from a `rule_sets` entry. `match` contains glob patterns (including `*.ts` and `**/*.ts`), and a rule's number is its minimum verdict confidence. `exclude` removes files from that entry:
 
@@ -142,10 +146,10 @@ Each run emits `run_started`, followed by one complete `snapshot`. The snapshot'
 `updated_paths` identifies exactly which files a streaming consumer should
 replace, while its `diagnostics` still contains the complete current set for
 file-based consumers. Sequence numbers associate the two messages and allow
-consumers to discard stale data.
-Operational failures are snapshots with `"status":"error"`, so a malformed
-rule or temporary API failure clears stale diagnostics without terminating the
-watcher.
+consumers to discard stale data. With `jevlint watch --stream`, each completed
+file also emits a `file_result` before the final snapshot. The VS Code extension
+uses this mode to publish diagnostics as files finish. An error snapshot restores
+the last completed diagnostic set if a streamed run fails.
 
 The latest snapshot can additionally be written to disk. Replacement is atomic,
 so readers never observe partial JSON:

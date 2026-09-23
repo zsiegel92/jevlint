@@ -4,6 +4,9 @@ This extension runs one `jevlint watch` process for every `.jevlintrc.jsonc`
 found in a trusted workspace. It converts the versioned JSON Lines stream into
 native VS Code diagnostics.
 
+The extension starts watch mode with `--stream`, so each file's diagnostics can
+appear as soon as that file finishes. A final snapshot reconciles the full run.
+
 - Error and warning severities appear in the Problems panel and editor.
 - Line-detected findings underline each complete reported line range.
 - File-wide findings use the first line, which gives VS Code a conventional

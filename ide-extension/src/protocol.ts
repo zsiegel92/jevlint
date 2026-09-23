@@ -61,7 +61,16 @@ export type Snapshot = {
 	error: string | null;
 };
 
-export type WatchMessage = RunStarted | Snapshot;
+export type FileResult = {
+	schemaVersion: 1;
+	kind: "file_result";
+	sequence: number;
+	root: string;
+	path: string;
+	diagnostics: readonly LintDiagnostic[];
+};
+
+export type WatchMessage = RunStarted | FileResult | Snapshot;
 
 export function parseWatchMessage(line: string): WatchMessage {
 	const value: unknown = JSON.parse(line) as unknown;
@@ -71,8 +80,26 @@ export function parseWatchMessage(line: string): WatchMessage {
 	}
 	const kind = text(record.kind, "kind");
 	if (kind === "run_started") return parseStarted(record);
+	if (kind === "file_result") return parseFileResult(record);
 	if (kind === "snapshot") return parseSnapshot(record);
 	throw new Error(`unknown message kind ${JSON.stringify(kind)}`);
+}
+
+function parseFileResult(record: Record<string, unknown>): FileResult {
+	const result = {
+		schemaVersion: 1,
+		kind: "file_result",
+		sequence: nonnegativeInteger(record.sequence, "sequence"),
+		root: text(record.root, "root"),
+		path: text(record.path, "path"),
+		diagnostics: array(record.diagnostics, "diagnostics").map(parseDiagnostic),
+	} satisfies FileResult;
+	if (
+		result.diagnostics.some((diagnostic) => diagnostic.path !== result.path)
+	) {
+		throw new Error("file_result contains a diagnostic for another path");
+	}
+	return result;
 }
 
 function parseStarted(record: Record<string, unknown>): RunStarted {

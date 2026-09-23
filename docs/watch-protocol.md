@@ -20,6 +20,26 @@ unknown object fields and object kinds so the protocol can grow compatibly.
 paths are project-relative and are informational: a run may inspect additional
 files because rules, shared prompts, and preconditions have project-wide effects.
 
+## File result (optional streaming mode)
+
+`jevlint watch --stream` emits one `file_result` for each completed file before
+the final snapshot. A result replaces the diagnostics for its `path`, including
+when `diagnostics` is empty. Consumers should keep other files' diagnostics and
+wait for the final snapshot before treating the run as complete.
+
+```json
+{
+  "schema_version": 1,
+  "kind": "file_result",
+  "sequence": 2,
+  "root": "/workspace/project",
+  "path": "src/auth.ts",
+  "diagnostics": []
+}
+```
+
+The default watch mode emits no `file_result` messages.
+
 ## Snapshot
 
 ```json
@@ -65,6 +85,10 @@ single-file edit. When `full_update` is true, consumers should replace the
 entire diagnostic set; this is used for initial runs and project-wide rule,
 prompt, or configuration changes. File-output consumers may simply replace
 their full stored snapshot.
+
+Every run still ends with one snapshot in streaming mode. If a run fails after
+some file results, its error snapshot restores the last completed diagnostic
+set with `full_update: true`.
 
 Paths, including `rule_path`, are relative to `root`. `message` comes from the
 rule Markdown before its first horizontal rule (`---` or longer), or from the

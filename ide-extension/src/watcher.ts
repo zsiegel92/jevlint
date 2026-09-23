@@ -61,7 +61,7 @@ export class WatchSession {
 		);
 		const child = spawn(
 			this.executable,
-			["watch", "--config", this.configPath],
+			["watch", "--stream", "--config", this.configPath],
 			{
 				cwd: path.dirname(this.configPath),
 				env: process.env,

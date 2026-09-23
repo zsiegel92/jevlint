@@ -25,6 +25,9 @@ struct Cli {
     /// Print a one-shot check as structured JSON instead of human-readable text.
     #[arg(long)]
     json: bool,
+    /// Stream file findings before the final report or watch snapshot.
+    #[arg(long, global = true)]
+    stream: bool,
     /// Ignore cached results for this check without changing the project's cache.
     #[arg(long)]
     force_fresh: bool,
@@ -71,6 +74,7 @@ async fn run() -> anyhow::Result<i32> {
     match cli.command {
         Some(Command::Init) => {
             ensure!(!cli.json, "--json is only valid for one-shot checks");
+            ensure!(!cli.stream, "--stream is only valid for checks and watch");
             ensure!(
                 !cli.force_fresh,
                 "--force-fresh is only valid for one-shot checks"
@@ -80,6 +84,7 @@ async fn run() -> anyhow::Result<i32> {
         }
         Some(Command::Schema { output }) => {
             ensure!(!cli.json, "--json is only valid for one-shot checks");
+            ensure!(!cli.stream, "--stream is only valid for checks and watch");
             ensure!(
                 !cli.force_fresh,
                 "--force-fresh is only valid for one-shot checks"
@@ -94,6 +99,7 @@ async fn run() -> anyhow::Result<i32> {
                 "--force-fresh is only valid for one-shot checks"
             );
             ensure!(!cli.dry_run, "--dry-run cannot be used with watch");
+            ensure!(!cli.stream || !no_stdout, "--stream requires stdout");
             ensure!(
                 output.is_some() || !no_stdout,
                 "watch needs stdout or --output"
@@ -103,12 +109,22 @@ async fn run() -> anyhow::Result<i32> {
                 WatchOptions {
                     snapshot_file: output.map(|path| absolute(&path)).transpose()?,
                     stdout: !no_stdout,
+                    stream: cli.stream,
                 },
             )
             .await?;
             Ok(0)
         }
-        None => check(config_path, cli.dry_run, cli.json, cli.force_fresh).await,
+        None => {
+            check(
+                config_path,
+                cli.dry_run,
+                cli.json,
+                cli.stream,
+                cli.force_fresh,
+            )
+            .await
+        }
     }
 }
 
@@ -193,9 +209,15 @@ async fn check(
     config_path: PathBuf,
     dry_run: bool,
     json: bool,
+    stream: bool,
     force_fresh: bool,
 ) -> anyhow::Result<i32> {
     ensure!(!dry_run || !json, "--dry-run and --json cannot be combined");
+    ensure!(
+        !dry_run || !stream,
+        "--dry-run and --stream cannot be combined"
+    );
+    ensure!(!json || !stream, "--json and --stream cannot be combined");
     ensure!(
         !dry_run || !force_fresh,
         "--dry-run and --force-fresh cannot be combined"
@@ -224,9 +246,23 @@ async fn check(
         api_key,
     )?);
     let engine = Engine::new(root, config, provider);
-    let result = engine.run().await?;
+    let result = if stream {
+        engine
+            .run_with_progress(|file| {
+                let stdout = std::io::stdout();
+                let mut output = stdout.lock();
+                report::print_violations(&file.violations, &mut output)?;
+                output.flush()?;
+                Ok(())
+            })
+            .await?
+    } else {
+        engine.run().await?
+    };
     if json {
         println!("{}", serde_json::to_string(&result)?);
+    } else if stream && result.precondition_failure.is_none() {
+        report::print_summary(&result, std::io::stdout())?;
     } else {
         report::print(&result, std::io::stdout(), std::io::stderr())?;
     }

@@ -139,6 +139,8 @@ export class JevLintManager implements vscode.Disposable {
 		if (!this.sessions.has(id)) return;
 		if (message.kind === "run_started") {
 			this.states.set(id, { kind: "running" });
+		} else if (message.kind === "file_result") {
+			this.diagnostics.updateFile(id, message);
 		} else {
 			this.states.set(id, { kind: "snapshot", snapshot: message });
 			this.diagnostics.update(id, message);

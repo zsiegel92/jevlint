@@ -42,7 +42,7 @@ impl RunReport {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Violation {
     pub path: PathBuf,
     pub rule_id: String,
@@ -53,7 +53,7 @@ pub struct Violation {
     pub regions: Vec<LineRegion>,
 }
 
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LineRegion {
     pub start: usize,
     pub end: usize,
@@ -90,6 +90,22 @@ impl Engine {
     }
 
     pub async fn run_files(&self, files: Vec<PathBuf>) -> anyhow::Result<RunReport> {
+        self.run_files_with_progress(files, |_| Ok(())).await
+    }
+
+    pub async fn run_with_progress(
+        &self,
+        on_file: impl FnMut(&FileProgress) -> anyhow::Result<()>,
+    ) -> anyhow::Result<RunReport> {
+        let files = self.selected_files()?;
+        self.run_files_with_progress(files, on_file).await
+    }
+
+    pub async fn run_files_with_progress(
+        &self,
+        files: Vec<PathBuf>,
+        mut on_file: impl FnMut(&FileProgress) -> anyhow::Result<()>,
+    ) -> anyhow::Result<RunReport> {
         let rules = Arc::new(rule::load(&self.root.join(&self.config.rules_dir)).await?);
         validate_rule_sets(&self.config, &rules)?;
         let matcher = files::FileMatcher::new(&self.config)?;
@@ -147,7 +163,9 @@ impl Engine {
             }
         }
         while let Some(result) = tasks.join_next().await {
-            reports.push(result??);
+            let report = result??;
+            on_file(&report)?;
+            reports.push(report);
             if let Some(job) = pending.next() {
                 spawn_file(&mut tasks, Arc::clone(&context), job);
             }
@@ -187,7 +205,7 @@ fn validate_rule_sets(config: &Config, rules: &[Rule]) -> anyhow::Result<()> {
 }
 
 fn spawn_file(
-    tasks: &mut JoinSet<anyhow::Result<FileReport>>,
+    tasks: &mut JoinSet<anyhow::Result<FileProgress>>,
     context: Arc<FileContext>,
     job: FileJob,
 ) {
@@ -215,11 +233,11 @@ struct FileContext {
     provider: Arc<dyn LintProvider>,
 }
 
-struct FileReport {
-    path: PathBuf,
-    api_requests: usize,
-    cache_hits: usize,
-    violations: Vec<Violation>,
+pub struct FileProgress {
+    pub path: PathBuf,
+    pub api_requests: usize,
+    pub cache_hits: usize,
+    pub violations: Vec<Violation>,
 }
 
 #[derive(Serialize)]
@@ -243,7 +261,7 @@ struct LineCacheIdentity<'a> {
     schema: &'static str,
 }
 
-async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<FileReport> {
+async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<FileProgress> {
     let FileJob {
         path,
         rules: selections,
@@ -372,7 +390,7 @@ async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<Fi
         })
         .collect();
     apply_jevlint_ignores(&source, &mut violations);
-    Ok(FileReport {
+    Ok(FileProgress {
         path,
         api_requests,
         cache_hits,
@@ -628,6 +646,47 @@ mod tests {
         let report = engine.run().await.unwrap();
         assert!(report.violations.is_empty());
         assert!(!report.has_errors());
+    }
+
+    #[tokio::test]
+    async fn reports_each_file_before_the_final_report() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".jevlint-rules")).unwrap();
+        std::fs::write(project.path().join("a.rs"), "first\n").unwrap();
+        std::fs::write(project.path().join("b.rs"), "second\n").unwrap();
+        std::fs::write(project.path().join(".jevlint-rules/safe.md"), "No unsafe.").unwrap();
+        std::fs::write(project.path().join(".jevlint-system.md"), "Lint the file.").unwrap();
+        let config = Config {
+            rule_sets: vec![RuleSet {
+                patterns: vec!["*.rs".into()],
+                exclude: Vec::new(),
+                error: BTreeMap::from([("safe".into(), 0.8)]),
+                warn: BTreeMap::new(),
+            }],
+            ..Config::default()
+        };
+        let provider = Arc::new(FakeProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let engine = Engine::new(project.path().into(), config, provider);
+        let mut completed = Vec::new();
+
+        let report = engine
+            .run_with_progress(|file| {
+                assert_eq!(file.violations.len(), 1);
+                completed.push(file.path.clone());
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        completed.sort();
+        assert_eq!(
+            completed,
+            vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")]
+        );
+        assert_eq!(report.files_checked, 2);
+        assert_eq!(report.violations.len(), 2);
     }
 
     #[tokio::test]
