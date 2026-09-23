@@ -2,6 +2,14 @@
 
 `jevlint` is a concurrent semantic code linter backed by Jev. It evaluates every selected file against Markdown rules, caches each rule result independently, and can make a second cached pass that identifies the lines involved in each violation.
 
+## Demo
+
+**In this demo, we define a lint rule as a markdown file and watch the IDE extension (which streams output from the `watch CLI`) render problems in VS Code:**
+
+https://github.com/user-attachments/assets/b73279fa-387a-4d3b-9513-2a4f0b186e5f
+
+
+
 ## Set up
 
 Build an optimized binary and install it to `~/.local/bin`:
