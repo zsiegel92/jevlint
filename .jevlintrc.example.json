@@ -1,0 +1,22 @@
+{
+  "exclude": ["target/**", ".jevlint/**"],
+  "rules_dir": ".jevlint-rules",
+  "system_prompt": ".jevlint-system.md",
+  "cache_dir": ".jevlint",
+  "model": "jev-latest",
+  "concurrency": 5,
+  "request_timeout_seconds": 30,
+  "rule_sets": [
+    {
+      "match": ["*.rs", "**/*.rs"],
+      "exclude": ["src/generated/**"],
+      "error": { "security-boundary": 0.8 },
+      "warn": { "maintainability-note": 0.8 }
+    }
+  ],
+  "line_detection": {
+    "enabled": true,
+    "max_questions_per_request": 200
+  },
+  "watch": { "debounce_milliseconds": 300 }
+}

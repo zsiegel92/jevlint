@@ -556,12 +556,13 @@ mod tests {
     #[test]
     fn watches_sources_and_linter_inputs_but_not_cache_files() {
         let root = Path::new("/project");
-        let config_path = root.join(".jevlintrc.toml");
+        let config_path = root.join(".jevlintrc.json");
         let config = Config {
             rule_sets: vec![RuleSet {
-                files: vec!["**/*.ts".into()],
-                excluded_files: Vec::new(),
-                rules: BTreeMap::from([("security".into(), Severity::Error)]),
+                patterns: vec!["**/*.ts".into()],
+                exclude: Vec::new(),
+                error: BTreeMap::from([("security".into(), 0.8)]),
+                warn: BTreeMap::new(),
             }],
             ..Config::default()
         };

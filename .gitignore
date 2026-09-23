@@ -1,5 +1,6 @@
 /target/
 /.jevlint/
+smoke-tests/**/.jevlint/
 .env
 scratch/
 **/.DS_Store

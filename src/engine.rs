@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, ensure};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::task::JoinSet;
 
 use crate::{
@@ -17,7 +17,7 @@ use crate::{
     rule::{self, Rule, Severity},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RunReport {
     pub files_checked: usize,
     pub rules: usize,
@@ -42,7 +42,7 @@ impl RunReport {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Violation {
     pub path: PathBuf,
     pub rule_id: String,
@@ -53,7 +53,7 @@ pub struct Violation {
     pub regions: Vec<LineRegion>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LineRegion {
     pub start: usize,
     pub end: usize,
@@ -101,9 +101,9 @@ impl Engine {
                     .iter()
                     .enumerate()
                     .filter_map(|(index, rule)| {
-                        selected.get(rule.id.as_str()).map(|severity| SelectedRule {
+                        selected.get(rule.id.as_str()).map(|setting| SelectedRule {
                             index,
-                            severity: *severity,
+                            setting: *setting,
                         })
                     })
                     .collect();
@@ -171,7 +171,12 @@ fn validate_rule_sets(config: &Config, rules: &[Rule]) -> anyhow::Result<()> {
         .map(|rule| rule.id.as_str())
         .collect::<BTreeSet<_>>();
     for (set_index, rule_set) in config.rule_sets.iter().enumerate() {
-        for rule_id in rule_set.rules.keys() {
+        for rule_id in rule_set
+            .error
+            .iter()
+            .chain(rule_set.warn.iter())
+            .filter_map(|(id, threshold)| (*threshold >= 0.0).then_some(id))
+        {
             ensure!(
                 known.contains(rule_id.as_str()),
                 "rule_sets[{set_index}] references unknown rule {rule_id:?}"
@@ -196,7 +201,7 @@ struct FileJob {
 
 struct SelectedRule {
     index: usize,
-    severity: Severity,
+    setting: files::RuleSetting,
 }
 
 struct FileContext {
@@ -311,7 +316,13 @@ async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<Fi
     answers.sort_by(|a, b| a.rule_id.cmp(&b.rule_id));
     let failed = answers
         .into_iter()
-        .filter(|x| x.verdict == Verdict::Fail)
+        .filter(|answer| {
+            answer.verdict == Verdict::Fail
+                && selections.iter().any(|selection| {
+                    context.rules[selection.index].id == answer.rule_id
+                        && answer.confidence >= selection.setting.threshold
+                })
+        })
         .collect::<Vec<_>>();
     let locations = if context.line_detection.enabled && !failed.is_empty() {
         locate(
@@ -327,7 +338,7 @@ async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<Fi
     } else {
         BTreeMap::new()
     };
-    let violations = failed
+    let mut violations: Vec<Violation> = failed
         .into_iter()
         .map(|answer| {
             let rule = context
@@ -349,6 +360,7 @@ async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<Fi
                     .iter()
                     .find(|selection| context.rules[selection.index].id == answer.rule_id)
                     .expect("answer rule was selected")
+                    .setting
                     .severity,
                 regions: regions(
                     locations
@@ -359,12 +371,38 @@ async fn lint_file(context: Arc<FileContext>, job: FileJob) -> anyhow::Result<Fi
             }
         })
         .collect();
+    apply_jevlint_ignores(&source, &mut violations);
     Ok(FileReport {
         path,
         api_requests,
         cache_hits,
         violations,
     })
+}
+
+fn apply_jevlint_ignores(source: &str, violations: &mut Vec<Violation>) {
+    let ignored_lines = source
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| line.contains("jevlint-ignore").then_some(index + 1))
+        .collect::<BTreeSet<_>>();
+    if ignored_lines.is_empty() {
+        return;
+    }
+
+    violations.retain_mut(|violation| {
+        if violation.regions.is_empty() {
+            return true;
+        }
+        let visible_lines = violation
+            .regions
+            .iter()
+            .flat_map(|region| region.start..=region.end)
+            .filter(|line| !ignored_lines.contains(line))
+            .collect::<Vec<_>>();
+        violation.regions = regions(&visible_lines);
+        !violation.regions.is_empty()
+    });
 }
 
 async fn locate(
@@ -376,7 +414,12 @@ async fn locate(
     api_requests: &mut usize,
     cache_hits: &mut usize,
 ) -> anyhow::Result<BTreeMap<String, Vec<usize>>> {
-    let line_count = source.lines().count().max(1);
+    let source_lines = if source.is_empty() {
+        vec![""]
+    } else {
+        source.lines().collect::<Vec<_>>()
+    };
+    let line_count = source_lines.len();
     let rules = failed
         .iter()
         .map(|answer| {
@@ -399,7 +442,7 @@ async fn locate(
                     prompt_hash: &context.prompt_hash,
                     model: &context.model,
                     line,
-                    schema: "line-noul-v1",
+                    schema: "line-noul-v2-exact-line",
                 },
             )?;
             entries.push((key, rule, line));
@@ -436,6 +479,7 @@ async fn locate(
             .map(|&index| LineQuestion {
                 rule: entries[index].1,
                 line: entries[index].2,
+                text: source_lines[entries[index].2 - 1],
             })
             .collect::<Vec<_>>();
         let fresh = context
@@ -548,6 +592,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ignores_marked_lines_in_final_report() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".jevlint-rules")).unwrap();
+        let source_path = project.path().join("sample.rs");
+        std::fs::write(&source_path, "first\njevlint-ignore\nthird\n").unwrap();
+        std::fs::write(project.path().join(".jevlint-rules/safe.md"), "No unsafe.").unwrap();
+        std::fs::write(project.path().join(".jevlint-system.md"), "Lint the file.").unwrap();
+        let config = Config {
+            rule_sets: vec![RuleSet {
+                patterns: vec!["*.rs".into()],
+                exclude: Vec::new(),
+                error: BTreeMap::from([("safe".into(), 0.8)]),
+                warn: BTreeMap::new(),
+            }],
+            ..Config::default()
+        };
+        let provider = Arc::new(FakeProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let engine = Engine::new(project.path().into(), config, provider);
+
+        let report = engine.run().await.unwrap();
+        assert_eq!(report.violations.len(), 1);
+        assert_eq!(
+            report.violations[0].regions,
+            vec![
+                LineRegion { start: 1, end: 1 },
+                LineRegion { start: 3, end: 3 },
+            ]
+        );
+        assert!(report.has_errors());
+
+        std::fs::write(&source_path, "jevlint-ignore\n").unwrap();
+        let report = engine.run().await.unwrap();
+        assert!(report.violations.is_empty());
+        assert!(!report.has_errors());
+    }
+
+    #[tokio::test]
     async fn reuses_verdict_and_line_cache() {
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir(project.path().join(".jevlint-rules")).unwrap();
@@ -559,9 +642,10 @@ mod tests {
         });
         let mut config = Config {
             rule_sets: vec![RuleSet {
-                files: vec!["*.rs".into()],
-                excluded_files: Vec::new(),
-                rules: BTreeMap::from([("safe".into(), Severity::Warning)]),
+                patterns: vec!["*.rs".into()],
+                exclude: Vec::new(),
+                error: BTreeMap::new(),
+                warn: BTreeMap::from([("safe".into(), 0.8)]),
             }],
             ..Config::default()
         };
@@ -572,9 +656,8 @@ mod tests {
         assert!(!first.has_errors());
         assert_eq!(first.violations[0].regions[0].start, 1);
 
-        config.rule_sets[0]
-            .rules
-            .insert("safe".into(), Severity::Error);
+        config.rule_sets[0].warn.clear();
+        config.rule_sets[0].error.insert("safe".into(), 0.8);
         let second = Engine::new(project.path().into(), config, provider.clone())
             .run()
             .await
@@ -584,5 +667,21 @@ mod tests {
         assert_eq!(second.violations[0].regions[0].start, 1);
         assert!(second.has_errors());
         assert_eq!(provider.calls.load(Ordering::Relaxed), 2);
+
+        let strict = Config {
+            rule_sets: vec![RuleSet {
+                patterns: vec!["*.rs".into()],
+                exclude: Vec::new(),
+                error: BTreeMap::from([("safe".into(), 0.95)]),
+                warn: BTreeMap::new(),
+            }],
+            ..Config::default()
+        };
+        let suppressed = Engine::new(project.path().into(), strict, provider.clone())
+            .run()
+            .await
+            .unwrap();
+        assert!(suppressed.violations.is_empty());
+        assert_eq!(suppressed.api_requests, 0);
     }
 }

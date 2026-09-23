@@ -14,13 +14,19 @@ globset = "0.4"
 ignore = "0.4"
 notify = "8.2"
 redb = "3.0"
+schemars = "1.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3.20"
 tokio = { version = "1.47", features = ["fs", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
-toml = "0.9"
+url = "2.5"
 
 [profile.release]
 lto = "thin"
 strip = true
+
+[[bin]]
+name = "jevlint-smoke"
+path = "smoke-tests/run.rs"
+test = false

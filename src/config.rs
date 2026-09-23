@@ -6,50 +6,84 @@ use std::{
 };
 
 use anyhow::{Context, ensure};
-use serde::Deserialize;
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::{Deserialize, Serialize};
 
-use crate::rule::Severity;
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    #[serde(default)]
     pub exclude: Vec<String>,
+    #[serde(default = "default_rules_dir")]
     pub rules_dir: PathBuf,
+    #[schemars(length(min = 1))]
     pub rule_sets: Vec<RuleSet>,
+    #[serde(default = "default_system_prompt")]
     pub system_prompt: PathBuf,
+    #[serde(default = "default_cache_dir")]
     pub cache_dir: PathBuf,
+    #[serde(default)]
     pub typesafe_api_key_file: Option<PathBuf>,
+    #[serde(default = "default_model")]
     pub model: String,
+    #[serde(default = "default_concurrency")]
     pub concurrency: NonZeroUsize,
+    #[serde(default = "default_timeout")]
     pub request_timeout_seconds: u64,
+    #[serde(default)]
     pub line_detection: LineDetectionConfig,
+    #[serde(default)]
     pub watch: WatchConfig,
+    #[serde(default)]
     pub precondition: Option<PreconditionConfig>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct LineDetectionConfig {
     pub enabled: bool,
     pub max_questions_per_request: NonZeroUsize,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreconditionConfig {
     pub command: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RuleSet {
-    pub files: Vec<String>,
+    /// File globs relative to the config directory, such as **/*.ts.
+    #[serde(rename = "match")]
+    #[schemars(length(min = 1))]
+    pub patterns: Vec<String>,
     #[serde(default)]
-    pub excluded_files: Vec<String>,
-    pub rules: BTreeMap<String, Severity>,
+    pub exclude: Vec<String>,
+    #[serde(default)]
+    /// Rule IDs to minimum verdict confidence (0 to 1 inclusive).
+    #[schemars(schema_with = "rule_thresholds_schema")]
+    pub error: BTreeMap<String, f64>,
+    #[serde(default)]
+    /// Rule IDs to minimum verdict confidence (0 to 1 inclusive).
+    #[schemars(schema_with = "rule_thresholds_schema")]
+    pub warn: BTreeMap<String, f64>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+fn rule_thresholds_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "object",
+        "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+        }
+    })
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct WatchConfig {
     pub debounce_milliseconds: u64,
@@ -58,15 +92,16 @@ pub struct WatchConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            schema: None,
             exclude: vec!["target/**".into(), ".jevlint/**".into()],
-            rules_dir: ".jevlint-rules".into(),
+            rules_dir: default_rules_dir(),
             rule_sets: Vec::new(),
-            system_prompt: ".jevlint-system.md".into(),
-            cache_dir: ".jevlint".into(),
+            system_prompt: default_system_prompt(),
+            cache_dir: default_cache_dir(),
             typesafe_api_key_file: None,
-            model: "jev-latest".into(),
-            concurrency: NonZeroUsize::new(5).unwrap(),
-            request_timeout_seconds: 30,
+            model: default_model(),
+            concurrency: default_concurrency(),
+            request_timeout_seconds: default_timeout(),
             line_detection: LineDetectionConfig::default(),
             watch: WatchConfig::default(),
             precondition: None,
@@ -96,8 +131,8 @@ impl Config {
         let text = tokio::fs::read_to_string(path)
             .await
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let config: Self =
-            toml::from_str(&text).with_context(|| format!("invalid config {}", path.display()))?;
+        let config: Self = serde_json::from_str(&text)
+            .with_context(|| format!("invalid config {}", path.display()))?;
         config.validate()?;
         Ok(config)
     }
@@ -105,7 +140,7 @@ impl Config {
     pub fn validate(&self) -> anyhow::Result<()> {
         ensure!(
             !self.rule_sets.is_empty(),
-            "config requires a [[rule_sets]] block"
+            "config requires at least one rule_sets entry"
         );
         if let Some(precondition) = &self.precondition {
             ensure!(
@@ -115,13 +150,25 @@ impl Config {
         }
         for (index, rule_set) in self.rule_sets.iter().enumerate() {
             ensure!(
-                !rule_set.files.is_empty(),
-                "rule_sets[{index}].files cannot be empty"
+                !rule_set.patterns.is_empty(),
+                "rule_sets[{index}].match cannot be empty"
             );
             ensure!(
-                !rule_set.rules.is_empty(),
-                "rule_sets[{index}].rules cannot be empty"
+                !rule_set.error.is_empty() || !rule_set.warn.is_empty(),
+                "rule_sets[{index}] requires error or warn rules"
             );
+            for (id, threshold) in &rule_set.error {
+                ensure!(
+                    *threshold < 0.0 || !rule_set.warn.get(id).is_some_and(|value| *value >= 0.0),
+                    "rule_sets[{index}] declares {id:?} as both error and warn"
+                );
+            }
+            for threshold in rule_set.error.values().chain(rule_set.warn.values()) {
+                ensure!(
+                    threshold.is_finite(),
+                    "rule_sets[{index}] threshold must be finite"
+                );
+            }
         }
         Ok(())
     }
@@ -156,6 +203,25 @@ impl Config {
     }
 }
 
+fn default_rules_dir() -> PathBuf {
+    ".jevlint-rules".into()
+}
+fn default_system_prompt() -> PathBuf {
+    ".jevlint-system.md".into()
+}
+fn default_cache_dir() -> PathBuf {
+    ".jevlint".into()
+}
+fn default_model() -> String {
+    "jev-latest".into()
+}
+fn default_concurrency() -> NonZeroUsize {
+    NonZeroUsize::new(5).expect("nonzero")
+}
+fn default_timeout() -> u64 {
+    30
+}
+
 fn resolve_key_path(root: &Path, path: &Path) -> anyhow::Result<PathBuf> {
     if path.is_absolute() {
         return Ok(path.to_owned());
@@ -174,4 +240,38 @@ fn home_directory() -> anyhow::Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .context("HOME is not set; configure typesafe_api_key_file explicitly")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn committed_schema_matches_config_type() {
+        let generated = serde_json::to_value(schemars::schema_for!(Config)).unwrap();
+        let committed: serde_json::Value =
+            serde_json::from_str(include_str!("../schema/jevlint.schema.json")).unwrap();
+        assert_eq!(generated, committed);
+    }
+
+    #[test]
+    fn schema_bounds_rule_thresholds() {
+        let schema = serde_json::to_value(schemars::schema_for!(Config)).unwrap();
+        for severity in ["error", "warn"] {
+            let threshold =
+                &schema["$defs"]["RuleSet"]["properties"][severity]["additionalProperties"];
+            assert_eq!(threshold["minimum"], 0);
+            assert_eq!(threshold["maximum"], 1);
+        }
+    }
+
+    #[test]
+    fn json_rejects_unknown_fields_and_accepts_thresholds() {
+        let config: Config =
+            serde_json::from_str(r#"{"rule_sets":[{"match":["**/*.ts"],"warn":{"example":1.4}}]}"#)
+                .unwrap();
+        config.validate().unwrap();
+        assert_eq!(config.rule_sets[0].warn["example"], 1.4);
+        assert!(serde_json::from_str::<Config>(r#"{"rule_sets":[],"typo":true}"#).is_err());
+    }
 }

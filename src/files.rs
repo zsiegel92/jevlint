@@ -9,6 +9,12 @@ use ignore::WalkBuilder;
 
 use crate::{config::Config, rule::Severity};
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RuleSetting {
+    pub severity: Severity,
+    pub threshold: f64,
+}
+
 pub struct FileMatcher {
     exclude: GlobSet,
     rule_sets: Vec<RuleSetMatcher>,
@@ -17,7 +23,7 @@ pub struct FileMatcher {
 struct RuleSetMatcher {
     files: GlobSet,
     excluded_files: GlobSet,
-    rules: BTreeMap<String, Severity>,
+    rules: BTreeMap<String, RuleSetting>,
 }
 
 impl FileMatcher {
@@ -26,10 +32,33 @@ impl FileMatcher {
             .rule_sets
             .iter()
             .map(|rule_set| {
+                let rules = rule_set
+                    .error
+                    .iter()
+                    .map(|(id, threshold)| {
+                        (
+                            id.clone(),
+                            RuleSetting {
+                                severity: Severity::Error,
+                                threshold: threshold.min(1.0),
+                            },
+                        )
+                    })
+                    .chain(rule_set.warn.iter().map(|(id, threshold)| {
+                        (
+                            id.clone(),
+                            RuleSetting {
+                                severity: Severity::Warning,
+                                threshold: threshold.min(1.0),
+                            },
+                        )
+                    }))
+                    .filter(|(_, setting)| setting.threshold >= 0.0)
+                    .collect();
                 Ok(RuleSetMatcher {
-                    files: build_globs(&rule_set.files)?,
-                    excluded_files: build_globs(&rule_set.excluded_files)?,
-                    rules: rule_set.rules.clone(),
+                    files: build_globs(&rule_set.patterns)?,
+                    excluded_files: build_globs(&rule_set.exclude)?,
+                    rules,
                 })
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
@@ -43,7 +72,7 @@ impl FileMatcher {
         !self.exclude.is_match(relative_path) && !self.rules_for(relative_path).is_empty()
     }
 
-    pub fn rules_for<'a>(&'a self, relative_path: &Path) -> BTreeMap<&'a str, Severity> {
+    pub fn rules_for<'a>(&'a self, relative_path: &Path) -> BTreeMap<&'a str, RuleSetting> {
         if self.exclude.is_match(relative_path) {
             return BTreeMap::new();
         }
@@ -103,26 +132,29 @@ mod tests {
         rule::Severity,
     };
 
-    use super::FileMatcher;
+    use super::{FileMatcher, RuleSetting};
 
     #[test]
     fn selects_rules_and_severities_from_matching_sets() {
         let config = Config {
             rule_sets: vec![
                 RuleSet {
-                    files: vec!["**/*.py".into()],
-                    excluded_files: vec!["generated/**".into()],
-                    rules: BTreeMap::from([("python-boundaries".into(), Severity::Error)]),
+                    patterns: vec!["**/*.py".into()],
+                    exclude: vec!["generated/**".into()],
+                    error: BTreeMap::from([("python-boundaries".into(), 0.7)]),
+                    warn: BTreeMap::new(),
                 },
                 RuleSet {
-                    files: vec!["**/*.ts".into()],
-                    excluded_files: Vec::new(),
-                    rules: BTreeMap::from([("typescript-boundaries".into(), Severity::Warning)]),
+                    patterns: vec!["**/*.ts".into()],
+                    exclude: Vec::new(),
+                    error: BTreeMap::new(),
+                    warn: BTreeMap::from([("typescript-boundaries".into(), 0.8)]),
                 },
                 RuleSet {
-                    files: vec!["src/**".into()],
-                    excluded_files: Vec::new(),
-                    rules: BTreeMap::from([("shared-source-rule".into(), Severity::Error)]),
+                    patterns: vec!["src/**".into()],
+                    exclude: Vec::new(),
+                    error: BTreeMap::from([("shared-source-rule".into(), 1.5)]),
+                    warn: BTreeMap::new(),
                 },
             ],
             ..Config::default()
@@ -135,8 +167,20 @@ mod tests {
                 .into_iter()
                 .collect::<Vec<_>>(),
             vec![
-                ("python-boundaries", Severity::Error),
-                ("shared-source-rule", Severity::Error)
+                (
+                    "python-boundaries",
+                    RuleSetting {
+                        severity: Severity::Error,
+                        threshold: 0.7
+                    }
+                ),
+                (
+                    "shared-source-rule",
+                    RuleSetting {
+                        severity: Severity::Error,
+                        threshold: 1.0
+                    }
+                )
             ]
         );
         assert_eq!(
@@ -145,8 +189,20 @@ mod tests {
                 .into_iter()
                 .collect::<Vec<_>>(),
             vec![
-                ("shared-source-rule", Severity::Error),
-                ("typescript-boundaries", Severity::Warning)
+                (
+                    "shared-source-rule",
+                    RuleSetting {
+                        severity: Severity::Error,
+                        threshold: 1.0
+                    }
+                ),
+                (
+                    "typescript-boundaries",
+                    RuleSetting {
+                        severity: Severity::Warning,
+                        threshold: 0.8
+                    }
+                )
             ]
         );
         assert!(!matcher.is_lintable(Path::new("generated/models.py")));
@@ -159,5 +215,23 @@ mod tests {
 
         assert!(!matcher.is_lintable(Path::new("src/main.rs")));
         assert!(matcher.rules_for(Path::new("src/main.rs")).is_empty());
+    }
+
+    #[test]
+    fn negative_threshold_disables_a_rule() {
+        let config = Config {
+            rule_sets: vec![RuleSet {
+                patterns: vec!["*.ts".into()],
+                exclude: Vec::new(),
+                error: BTreeMap::from([("disabled".into(), -0.1)]),
+                warn: BTreeMap::new(),
+            }],
+            ..Config::default()
+        };
+        assert!(
+            !FileMatcher::new(&config)
+                .unwrap()
+                .is_lintable(Path::new("app.ts"))
+        );
     }
 }

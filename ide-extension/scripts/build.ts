@@ -1,4 +1,8 @@
 import { context } from "esbuild";
+import { copyFile, mkdir } from "node:fs/promises";
+
+await mkdir("schema", { recursive: true });
+await copyFile("../schema/jevlint.schema.json", "schema/jevlint.schema.json");
 
 const build = await context({
 	entryPoints: ["src/extension.ts"],

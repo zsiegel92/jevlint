@@ -21,13 +21,19 @@
 	"main": "./dist/extension.cjs",
 	"activationEvents": [
 		"onStartupFinished",
-		"workspaceContains:.jevlintrc.toml",
-		"workspaceContains:**/.jevlintrc.toml"
+		"workspaceContains:.jevlintrc.json",
+		"workspaceContains:**/.jevlintrc.json"
 	],
 	"extensionKind": [
 		"workspace"
 	],
 	"contributes": {
+		"jsonValidation": [
+			{
+				"fileMatch": ".jevlintrc.json",
+				"url": "./schema/jevlint.schema.json"
+			}
+		],
 		"commands": [
 			{
 				"command": "jevlint.restart",

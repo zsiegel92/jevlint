@@ -5,11 +5,12 @@ use std::{
 
 use anyhow::Context;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use crate::config::PreconditionConfig;
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PreconditionFailure {
     pub files: Vec<PathBuf>,
     pub command: Vec<String>,

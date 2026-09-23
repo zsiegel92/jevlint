@@ -13,14 +13,14 @@ Build an optimized binary and install it to `~/.local/bin`:
 Set `JEVLINT_INSTALL_DIR` to override the destination. The installer uses an
 atomic replacement and can safely be rerun after updating the source.
 
-Copy `.jevlintrc.example.toml` to `.jevlintrc.toml`, create `.jevlint-system.md`, and put one rule in each `.jevlint-rules/*.md` file. Rule filenames are stable rule IDs.
+Run `jevlint init` to create `.jevlintrc.json`, a system prompt, and a starter Markdown rule. Rule filenames are stable rule IDs. The installer also places a generated JSON Schema at `~/.local/share/jevlint/jevlint.schema.json`; `init` adds a `$schema` URI when that installed file is available. The VS Code extension associates the schema with every `.jevlintrc.json` without changing workspace settings.
 
 Put the raw TypeSafe API key in `~/.config/jevlint/typesafe-api-key`, or set
 `TYPESAFE_API_KEY`. The environment variable takes precedence. A project may
 choose another file, relative to its config directory or absolute:
 
-```toml
-typesafe_api_key_file = "~/.config/jevlint/typesafe-api-key"
+```json
+"typesafe_api_key_file": "~/.config/jevlint/typesafe-api-key"
 ```
 
 The key is read at the start of every run, including every watch pass, so it can
@@ -32,36 +32,40 @@ cargo run --release -- --dry-run
 cargo run --release
 ```
 
-Every linted file and rule comes from a `[[rule_sets]]` block. Patterns are
-gitignore-style globs, severities live beside their rule IDs, and
-`excluded_files` removes files from that block only:
+Every linted file and rule comes from a `rule_sets` entry. `match` contains glob patterns (including `*.ts` and `**/*.ts`), and a rule's number is its minimum verdict confidence. `exclude` removes files from that entry:
 
-```toml
-[[rule_sets]]
-files = ["*.py", "**/*.py"]
-
-[rule_sets.rules]
-python-boundaries = "error"
-
-[[rule_sets]]
-files = ["*.ts", "*.tsx", "**/*.ts", "**/*.tsx"]
-excluded_files = ["**/*.generated.ts"]
-
-[rule_sets.rules]
-typescript-boundaries = "error"
-shared-api-contracts = "warning"
+```json
+"rule_sets": [
+  {
+    "match": ["*.py", "**/*.py"],
+    "error": { "python-boundaries": 0.8 }
+  },
+  {
+    "match": ["*.ts", "*.tsx", "**/*.ts", "**/*.tsx"],
+    "exclude": ["**/*.generated.ts"],
+    "error": { "typescript-boundaries": 0.9 },
+    "warn": { "shared-api-contracts": 0.8 }
+  }
+]
 ```
 
 A file receives the union of rules from its matching sets. If the same rule is
-listed more than once, the later matching set determines its severity. Files
+listed more than once, the later matching set determines its severity and threshold. Files
 matching no rule set are not linted. There are no implicit rules or default file
-patterns.
+patterns. The JSON Schema flags thresholds outside 0–1 inclusive. For callers
+that bypass schema validation, the CLI still clamps values above 1 to 1 and
+disables values below 0.
 
 The optional project precondition runs once before any Jev requests. A nonzero exit marks every selected file as skipped and exits with status 1. This conservative batch behavior works with commands such as `cargo check`, `tsc --noEmit`, Biome, or ESLint without repeatedly invoking them per file.
 
-Unknown rule IDs and values other than `error` or `warning` are rejected.
+Unknown enabled rule IDs are rejected.
 Warnings appear in human and machine output but do not make a check exit with
 status 1.
+
+To suppress a reported line, include `jevlint-ignore` anywhere on that source
+line. The final report omits that line from CLI output, JSON output, and watch
+diagnostics. Other lines in the same finding remain visible. Findings without
+line locations remain visible.
 
 The rule's editor/CLI message is the Markdown before its first horizontal rule
 (`---` or longer). Everything after that separator remains part of the full
@@ -76,6 +80,35 @@ errors.
 Ready-to-copy configurations for TypeScript with TSC and Biome, and Python with
 Pyright and Ruff, are available under [`example-configs/`](example-configs/).
 
+## CLI smoke tests
+
+Run the two six-file fixture projects explicitly with:
+
+```sh
+./smoke-tests/run.sh
+```
+
+To force every smoke pass to bypass cached results, run
+`./smoke-tests/run.sh --force-fresh`. The default command deliberately checks
+that its second pass reuses the cache. Both modes start from a new temporary
+fixture copy, so neither uses cache files from previous smoke runs.
+
+The command builds the local debug CLI and a separate smoke runner. It uses a
+deterministic local Jev stand-in, so it needs no API key or network connection.
+It checks clean and violating Python, TypeScript, and JSON files; exact rule IDs,
+severities, and line regions; exit codes; precondition skips; a fully cached
+second pass; and single-file cache invalidation after an edit. The runner
+copies fixtures into a temporary directory, leaving the repository free of
+smoke-test cache files. It is not part of `cargo test`.
+
+Fixture configs are named `jevlint.smoke.json`, not `.jevlintrc.json`, so the
+VS Code extension does not discover or watch them. The runner passes each config
+explicitly via `--config`. One-shot checks also support `--json` for a typed
+`RunReport` on stdout, with the usual 0/1/2 exit statuses.
+For an ordinary one-shot CLI check, `jevlint --force-fresh` bypasses the existing
+cache for that run without deleting or changing it. This is intentionally a CLI
+flag rather than a config setting, so watch mode keeps caching normally.
+
 ## VS Code extension
 
 Install the bundled VS Code extension directly from this repository:
@@ -84,7 +117,7 @@ Install the bundled VS Code extension directly from this repository:
 ./ide-extension/install.sh
 ```
 
-It discovers `.jevlintrc.toml` files, runs the watch protocol, and publishes
+It discovers `.jevlintrc.json` files, runs the watch protocol, and publishes
 native error and warning diagnostics. See
 [`ide-extension/README.md`](ide-extension/README.md) for development commands
 and settings.
@@ -94,9 +127,8 @@ and settings.
 `jevlint watch` performs an initial run, watches the project with native
 filesystem notifications, and reruns after a configurable quiet period:
 
-```toml
-[watch]
-debounce_milliseconds = 300
+```json
+"watch": { "debounce_milliseconds": 300 }
 ```
 
 By default, stdout is a JSON Lines protocol intended to be consumed directly by

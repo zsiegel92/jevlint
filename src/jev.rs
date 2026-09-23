@@ -26,6 +26,7 @@ pub struct RuleAnswer {
 pub struct LineQuestion<'a> {
     pub rule: &'a Rule,
     pub line: usize,
+    pub text: &'a str,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -185,18 +186,18 @@ impl LintProvider for JevClient {
             json!({
                 "type": "noul",
                 "instructions": format!(
-                    "Does line {} contain or participate in a violation of this rule?\n\n{}",
-                    question.line, question.rule.markdown
+                    "Does this exact target line directly express the rule violation?\n\nTarget line {} (verbatim):\n{}\n\nRule:\n{}",
+                    question.line, question.text, question.rule.markdown
                 ),
                 "criteria": {
-                    "true": "This line is part of this rule violation.",
-                    "false": "This line is not part of this rule violation."
+                    "true": "The target line itself contains direct, specific evidence of the violation.",
+                    "false": "The target line does not itself contain direct evidence. Choose false for blank lines, imports, delimiters, declarations, control-flow structure, and surrounding context, even when a nearby line violates the rule."
                 }
             }),
         )).collect();
         let response = self.request(json!({
             "system_prompt": system_prompt,
-            "task": "Locate already-confirmed lint violations by line. Judge each rule and line independently.",
+            "task": "Select the smallest exact set of violating lines. Judge each target line independently and mark only lines whose own text directly expresses the violation. Never mark surrounding context merely because it belongs to the same class, function, statement, or block.",
             "file": { "path": path, "numbered_source": numbered_source }
         }), request_questions).await?;
         questions

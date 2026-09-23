@@ -6,7 +6,7 @@ semantic rules that complement ordinary static analysis: floating promises and
 unvalidated casts at trust boundaries.
 
 Floating promises are configured as errors, while unvalidated boundary casts
-are warnings. The `[[rule_sets]]` block binds those rules and severities to
+are warnings. The `rule_sets` entry binds those rules and confidence thresholds to
 TypeScript and TSX files; add more blocks for additional file groups.
 
 The precondition runs once for the whole project and requires both commands to
@@ -20,11 +20,11 @@ pnpm exec biome check .
 Install TypeScript and Biome in the target project before using it. A failure in
 either command skips Jev linting for every selected file.
 
-Copy `.jevlintrc.toml`, `.jevlint-system.md`, and `.jevlint-rules/` to the root
+Copy `.jevlintrc.json`, `.jevlint-system.md`, and `.jevlint-rules/` to the root
 of the target project, or invoke the example directly from this repository:
 
 ```sh
-jevlint --config example-configs/typescript/.jevlintrc.toml --dry-run
+jevlint --config example-configs/typescript/.jevlintrc.json --dry-run
 ```
 
 Relative paths and the precondition working directory are based on the folder

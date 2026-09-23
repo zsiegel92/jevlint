@@ -1,0 +1,12 @@
+{
+  "rules_dir": "../rules",
+  "system_prompt": "../system.md",
+  "cache_dir": ".jevlint",
+  "model": "smoke-model",
+  "rule_sets": [
+    { "match": ["*.py"], "error": { "python-no-smoke-marker": 0.8 } },
+    { "match": ["*.ts"], "warn": { "typescript-no-smoke-marker": 0.8 } },
+    { "match": ["*.json"], "exclude": ["jevlint.smoke.json"], "error": { "json-no-smoke-marker": 0.8 } }
+  ],
+  "line_detection": { "enabled": true, "max_questions_per_request": 200 }
+}

@@ -42,7 +42,7 @@ export class JevLintManager implements vscode.Disposable {
 		);
 
 		const configs =
-			vscode.workspace.createFileSystemWatcher("**/.jevlintrc.toml");
+			vscode.workspace.createFileSystemWatcher("**/.jevlintrc.json");
 		this.subscriptions.push(
 			configs,
 			configs.onDidCreate(() => this.scheduleRefresh()),
@@ -130,7 +130,7 @@ export class JevLintManager implements vscode.Disposable {
 			session.start();
 		}
 		if (paths.length === 0)
-			this.output.appendLine("No .jevlintrc.toml files found.");
+			this.output.appendLine("No .jevlintrc.json files found.");
 		this.refreshStatus();
 	}
 
@@ -228,7 +228,7 @@ async function discoverConfigs(): Promise<string[]> {
 	const found = await Promise.all(
 		folders.map((folder) =>
 			vscode.workspace.findFiles(
-				new vscode.RelativePattern(folder, "**/.jevlintrc.toml"),
+				new vscode.RelativePattern(folder, "**/.jevlintrc.json"),
 				"**/{.git,.jevlint,node_modules,target,.venv,venv}/**",
 			),
 		),
