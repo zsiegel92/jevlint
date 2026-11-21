@@ -239,12 +239,7 @@ async fn check(
     if let Some(directory) = &temporary_cache {
         config.cache_dir = directory.path().to_path_buf();
     }
-    let api_key = config.typesafe_api_key(&root).await?;
-    let provider = Arc::new(JevClient::new(
-        config.model.clone(),
-        config.request_timeout(),
-        api_key,
-    )?);
+    let provider = Arc::new(JevClient::from_config(&config, &root).await?);
     let engine = Engine::new(root, config, provider);
     let result = if stream {
         engine

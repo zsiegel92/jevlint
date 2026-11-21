@@ -28,6 +28,8 @@ pub struct Config {
     pub cache_dir: PathBuf,
     #[serde(default)]
     pub typesafe_api_key_file: Option<PathBuf>,
+    #[serde(default, rename = "typesafeCompatibleBaseUrlFile")]
+    pub typesafe_compatible_base_url_file: Option<PathBuf>,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default = "default_concurrency")]
@@ -101,6 +103,7 @@ impl Default for Config {
             system_prompt: default_system_prompt(),
             cache_dir: default_cache_dir(),
             typesafe_api_key_file: None,
+            typesafe_compatible_base_url_file: None,
             model: default_model(),
             concurrency: default_concurrency(),
             request_timeout_seconds: default_timeout(),
@@ -212,7 +215,7 @@ impl Config {
             return Ok(value.trim().to_owned());
         }
         let path = match &self.typesafe_api_key_file {
-            Some(path) => resolve_key_path(root, path)?,
+            Some(path) => resolve_file_path(root, path)?,
             None => default_key_path()?,
         };
         let value = tokio::fs::read_to_string(&path)
@@ -224,6 +227,28 @@ impl Config {
             path.display()
         );
         Ok(value.trim().to_owned())
+    }
+
+    pub async fn typesafe_compatible_base_url(
+        &self,
+        root: &Path,
+    ) -> anyhow::Result<Option<String>> {
+        let Some(path) = &self.typesafe_compatible_base_url_file else {
+            return Ok(None);
+        };
+        let path = resolve_file_path(root, path)?;
+        let value = tokio::fs::read_to_string(&path).await.with_context(|| {
+            format!(
+                "failed to read TypeSafe-compatible base URL from {}",
+                path.display()
+            )
+        })?;
+        ensure!(
+            !value.trim().is_empty(),
+            "TypeSafe-compatible base URL file is empty: {}",
+            path.display()
+        );
+        Ok(Some(value.trim().to_owned()))
     }
 }
 
@@ -246,7 +271,7 @@ fn default_timeout() -> u64 {
     30
 }
 
-fn resolve_key_path(root: &Path, path: &Path) -> anyhow::Result<PathBuf> {
+fn resolve_file_path(root: &Path, path: &Path) -> anyhow::Result<PathBuf> {
     if path.is_absolute() {
         return Ok(path.to_owned());
     }
@@ -263,7 +288,7 @@ fn default_key_path() -> anyhow::Result<PathBuf> {
 fn home_directory() -> anyhow::Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
-        .context("HOME is not set; configure typesafe_api_key_file explicitly")
+        .context("HOME is not set")
 }
 
 #[cfg(test)]
@@ -320,6 +345,35 @@ mod tests {
         let config = Config::load(&path).await.unwrap();
         assert_eq!(config.model, "https://example.com/model");
         assert_eq!(config.rule_sets[0].error["safe"], 0.8);
+    }
+
+    #[tokio::test]
+    async fn reads_base_url_from_config_relative_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let config: Config = serde_json::from_str(
+            r#"{"rule_sets":[],"typesafeCompatibleBaseUrlFile":"base-url.txt"}"#,
+        )
+        .unwrap();
+        let path = directory.path().join("base-url.txt");
+        assert!(
+            config
+                .typesafe_compatible_base_url(directory.path())
+                .await
+                .is_err()
+        );
+        std::fs::write(&path, "  https://example.com/api/\n").unwrap();
+        let base_url = config
+            .typesafe_compatible_base_url(directory.path())
+            .await
+            .unwrap();
+        assert_eq!(base_url.as_deref(), Some("https://example.com/api/"));
+        std::fs::write(&path, " \n").unwrap();
+        assert!(
+            config
+                .typesafe_compatible_base_url(directory.path())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

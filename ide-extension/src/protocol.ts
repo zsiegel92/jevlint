@@ -1,3 +1,5 @@
+// TODO: This whole module sucks. Use Zod, don't use type assertions, functions shouldn't have redundant params (e.g. `nonNegativeInteger(thing.num, 'num')` 🤮)
+
 export type Severity = "error" | "warning";
 
 export type RunStarted = {
@@ -72,6 +74,8 @@ export type FileResult = {
 
 export type WatchMessage = RunStarted | FileResult | Snapshot;
 
+// TODO: just use zod for most of what's in this file!
+// Use discriminated union for the different parseX
 export function parseWatchMessage(line: string): WatchMessage {
 	const value: unknown = JSON.parse(line) as unknown;
 	const record = asRecord(value, "message");
@@ -94,6 +98,8 @@ function parseFileResult(record: Record<string, unknown>): FileResult {
 		path: text(record.path, "path"),
 		diagnostics: array(record.diagnostics, "diagnostics").map(parseDiagnostic),
 	} satisfies FileResult;
+	// TODO: maybe overly defensive and possibly slow!
+	// Instead write some tests for this invariant
 	if (
 		result.diagnostics.some((diagnostic) => diagnostic.path !== result.path)
 	) {
@@ -213,6 +219,7 @@ function array(value: unknown, name: string): readonly unknown[] {
 	return value;
 }
 
+// This BS of passing a `name` param sucks. Use Zod, let Zod populate error messages
 function text(value: unknown, name: string): string {
 	if (typeof value !== "string") throw new Error(`${name} must be a string`);
 	return value;

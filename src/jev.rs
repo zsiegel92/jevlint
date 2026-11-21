@@ -1,11 +1,11 @@
-use std::{collections::BTreeMap, env, time::Duration};
+use std::{collections::BTreeMap, env, path::Path, time::Duration};
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{request_limit, rule::Rule};
+use crate::{config::Config, request_limit, rule::Rule};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -65,8 +65,29 @@ pub struct JevClient {
 
 impl JevClient {
     pub fn new(model: String, timeout: Duration, api_key: String) -> anyhow::Result<Self> {
-        let base_url =
-            env::var("TYPESAFE_BASE_URL").unwrap_or_else(|_| "https://api.typesafe.ai".into());
+        Self::with_base_url(model, timeout, api_key, None)
+    }
+
+    pub async fn from_config(config: &Config, root: &Path) -> anyhow::Result<Self> {
+        let api_key = config.typesafe_api_key(root).await?;
+        let base_url = config.typesafe_compatible_base_url(root).await?;
+        Self::with_base_url(
+            config.model.clone(),
+            config.request_timeout(),
+            api_key,
+            base_url,
+        )
+    }
+
+    fn with_base_url(
+        model: String,
+        timeout: Duration,
+        api_key: String,
+        base_url: Option<String>,
+    ) -> anyhow::Result<Self> {
+        let base_url = base_url.unwrap_or_else(|| {
+            env::var("TYPESAFE_BASE_URL").unwrap_or_else(|_| "https://api.typesafe.ai".into())
+        });
         let http = reqwest::Client::builder().timeout(timeout).build()?;
         Ok(Self {
             http,

@@ -69,6 +69,13 @@
       "type": "string",
       "default": ".jevlint-system.md"
     },
+    "typesafeCompatibleBaseUrlFile": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
     "typesafe_api_key_file": {
       "type": [
         "string",

@@ -146,12 +146,7 @@ async fn run_once(
         );
     }
     let result = async {
-        let api_key = config.typesafe_api_key(root).await?;
-        let provider = Arc::new(JevClient::new(
-            config.model.clone(),
-            config.request_timeout(),
-            api_key,
-        )?);
+        let provider = Arc::new(JevClient::from_config(config, root).await?);
         let engine = Engine::new(root.to_owned(), config.clone(), provider);
         if options.stream && options.stdout {
             engine

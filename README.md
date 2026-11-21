@@ -31,9 +31,19 @@ choose another file, relative to its config directory or absolute:
 "typesafe_api_key_file": "~/.config/jevlint/typesafe-api-key"
 ```
 
-The key is read at the start of every run, including every watch pass, so it can
-be added or replaced without restarting VS Code. Then verify file selection and
-run the linter:
+To use a TypeSafe-compatible endpoint, put its base URL in a text file and
+set `typesafeCompatibleBaseUrlFile` in `.jevlintrc.jsonc`:
+
+```json
+"typesafeCompatibleBaseUrlFile": "~/.config/jevlint/typesafe-base-url"
+```
+
+The path can be absolute, relative to the config directory, or start with `~/`.
+The file contents are trimmed and take precedence over `TYPESAFE_BASE_URL`.
+If neither is set, jevlint uses `https://api.typesafe.ai`.
+
+jevlint reads both settings for each lint pass, including in watch mode. Then
+verify file selection and run the linter:
 
 ```sh
 cargo run --release --bin jevlint -- --dry-run
