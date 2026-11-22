@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
 import type { FileResult, LintDiagnostic, Snapshot } from "./protocol.js";
@@ -82,13 +83,39 @@ function groupDiagnostics(
 	diagnostics: readonly LintDiagnostic[],
 ): Map<string, FileDiagnostics> {
 	const grouped = new Map<string, FileDiagnostics>();
+	const documents = new Map(
+		vscode.workspace.textDocuments.map((document) => [
+			document.uri.toString(),
+			document,
+		]),
+	);
+	const diskLines = new Map<string, string[]>();
 	for (const lint of diagnostics) {
 		const filePath = path.resolve(root, lint.path);
 		const uri = vscode.Uri.file(filePath);
+		const document = documents.get(uri.toString());
+		let lines = diskLines.get(filePath);
+		if (document === undefined && lines === undefined) {
+			try {
+				lines = readFileSync(filePath, "utf8").split(/\r\n|\r|\n/);
+			} catch {
+				lines = [];
+			}
+			diskLines.set(filePath, lines);
+		}
 		const existing = grouped.get(filePath)?.diagnostics ?? [];
 		grouped.set(filePath, {
 			uri,
-			diagnostics: [...existing, ...toDiagnostics(root, lint)],
+			diagnostics: [
+				...existing,
+				...toDiagnostics(root, lint, (line) => {
+					if (document !== undefined && line < document.lineCount) {
+						return document.lineAt(line).firstNonWhitespaceCharacterIndex;
+					}
+					const text = lines?.[line];
+					return text === undefined ? 0 : text.length - text.trimStart().length;
+				}),
+			],
 		});
 	}
 	return grouped;
@@ -97,13 +124,14 @@ function groupDiagnostics(
 function toDiagnostics(
 	root: string,
 	lint: LintDiagnostic,
+	startColumn: (line: number) => number,
 ): vscode.Diagnostic[] {
 	const regions =
 		lint.regions.length === 0 ? [{ startLine: 1, endLine: 1 }] : lint.regions;
 	return regions.map((region) => {
 		const range = new vscode.Range(
 			region.startLine - 1,
-			0,
+			startColumn(region.startLine - 1),
 			region.endLine - 1,
 			Number.MAX_SAFE_INTEGER,
 		);
